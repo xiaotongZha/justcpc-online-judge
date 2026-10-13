@@ -1,0 +1,8 @@
+{
+  "data": "./data",
+  "listen": "127.0.0.1:18081",
+  "judge_url": "http://127.0.0.1:18080",
+  "web_dist": "./web/dist",
+  "session_secret": "",
+  "initial_admin_password": ""
+}

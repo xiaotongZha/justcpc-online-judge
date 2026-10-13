@@ -1,0 +1,14 @@
+{
+  "name": "第十七届江苏科技大学程序设计竞赛（真实数据验收）",
+  "description": "基于第十七届正式赛题面、测试点和真实最终提交构建的验收比赛包。H 题保留测试数据但不含有效提交。",
+  "problems": [
+    {"label":"A","title":"第 17 届赛题 A","score":"50"},
+    {"label":"B","title":"第 17 届赛题 B","score":"75"},
+    {"label":"C","title":"第 17 届赛题 C","score":"75"},
+    {"label":"D","title":"第 17 届赛题 D","score":"75"},
+    {"label":"E","title":"第 17 届赛题 E","score":"100"},
+    {"label":"F","title":"第 17 届赛题 F","score":"125"},
+    {"label":"G","title":"第 17 届赛题 G","score":"150"},
+    {"label":"H","title":"第 17 届赛题 H","score":"200"}
+  ]
+}
