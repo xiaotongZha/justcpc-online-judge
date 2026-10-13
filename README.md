@@ -73,6 +73,3 @@ data/
 - **备份/迁移 = 打包整个 `data/`**（SQLite 是 WAL 模式，备份时最好先停服务，或确保 `-wal`/`-shm` 一起复制）；恢复即解压覆盖。
 - `config.json` 不在 `data/` 内（含 `session_secret`），换机器完整恢复时需一并带走。
 
-## 不入库
-
-`data/`、`config.json`、`web/node_modules/`、`web/dist/`、`web/*.tsbuildinfo`、`test/manual/.work/` 均不提交。
