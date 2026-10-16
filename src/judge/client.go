@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,44 @@ import (
 type Client struct {
 	URL  string
 	HTTP *http.Client
+}
+
+var ErrCapacityUnsupported = errors.New("judge engine does not expose capacity")
+
+// Capacity discovers the engine's fixed startup concurrency. A short deadline
+// keeps an unavailable engine from blocking dispatcher shutdown or the web UI.
+func (c Client) Capacity(ctx context.Context) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.URL, "/")+"/api/capacity", nil)
+	if err != nil {
+		return 0, err
+	}
+	client := c.HTTP
+	if client == nil {
+		client = http.DefaultClient
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return 0, ErrCapacityUnsupported
+	}
+	if response.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("judge capacity returned HTTP %d", response.StatusCode)
+	}
+	var capacity struct {
+		Workers int `json:"workers"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&capacity); err != nil {
+		return 0, fmt.Errorf("decode judge capacity: %w", err)
+	}
+	if capacity.Workers <= 0 {
+		return 0, fmt.Errorf("judge capacity must report positive workers")
+	}
+	return capacity.Workers, nil
 }
 
 type Task struct {

@@ -4,10 +4,18 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { store, goBack, navigate, refresh } from '../store'
 import type { ContestDetail, Submission } from '../store'
+import { deletingContestID, removeContest } from '../contestActions'
 
 type EvalProblem = { problem_id: number; label: string; title: string; score: string }
 type EvalCell = { has_submission: boolean; submission_id?: number; status?: string; score?: string }
-type EvalRow = { rank: number; has_score: boolean; student_id: string; name: string; cells: EvalCell[]; total: string }
+type EvalRow = {
+  rank: number
+  has_score: boolean
+  student_id: string
+  name: string
+  cells: EvalCell[]
+  total: string
+}
 type Evaluation = { contest_id: number; problems: EvalProblem[]; rows: EvalRow[]; pending: number }
 
 const detail = ref<ContestDetail | null>(null)
@@ -79,9 +87,11 @@ function colKeys(ci: number): string[] {
 }
 function allKeys(): string[] {
   const keys: string[] = []
-  evaluation.value.rows.forEach((row, ri) => row.cells.forEach((cell, ci) => {
-    if (cell.has_submission) keys.push(keyOf(ri, ci))
-  }))
+  evaluation.value.rows.forEach((row, ri) =>
+    row.cells.forEach((cell, ci) => {
+      if (cell.has_submission) keys.push(keyOf(ri, ci))
+    }),
+  )
   return keys
 }
 const isSelected = (ri: number, ci: number) => selected.value.has(keyOf(ri, ci))
@@ -102,9 +112,15 @@ function toggleCell(ri: number, ci: number) {
   if (!evaluation.value.rows[ri]?.cells[ci]?.has_submission) return
   setSelected([keyOf(ri, ci)], !isSelected(ri, ci))
 }
-function toggleRow(ri: number) { setSelected(rowKeys(ri), !rowSelected(ri)) }
-function toggleColumn(ci: number) { setSelected(colKeys(ci), !colSelected(ci)) }
-function selectAll() { setSelected(allKeys(), !allSelected.value) }
+function toggleRow(ri: number) {
+  setSelected(rowKeys(ri), !rowSelected(ri))
+}
+function toggleColumn(ci: number) {
+  setSelected(colKeys(ci), !colSelected(ci))
+}
+function selectAll() {
+  setSelected(allKeys(), !allSelected.value)
+}
 
 function enterFilter() {
   if (evaluation.value.pending > 0) return
@@ -180,7 +196,10 @@ async function downloadPost(path: string, filename: string) {
 async function exportExam() {
   if (!contestId.value) return
   try {
-    await downloadPost(`/contests/${contestId.value}/export-exam`, `exam-package-${contestId.value}.zip`)
+    await downloadPost(
+      `/contests/${contestId.value}/export-exam`,
+      `exam-package-${contestId.value}.zip`,
+    )
     ElMessage.success('考试包已导出')
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : String(e))
@@ -193,10 +212,13 @@ async function onImportFile(file: any) {
   const data = new FormData()
   data.append('file', file.raw)
   try {
-    const result = await api<{ contestants: number; submissions: number }>(`/contests/${contestId.value}/import-submissions`, {
-      method: 'POST',
-      body: data,
-    })
+    const result = await api<{ contestants: number; submissions: number }>(
+      `/contests/${contestId.value}/import-submissions`,
+      {
+        method: 'POST',
+        body: data,
+      },
+    )
     ElMessage.success(`已导入：新增考生 ${result.contestants}，提交 ${result.submissions}`)
     await reloadAll()
     await refresh()
@@ -211,8 +233,26 @@ async function onImportFile(file: any) {
 <template>
   <div v-if="detail || store.selectedContest">
     <div class="oj-toolbar">
-      <h2>{{ detail?.name || store.selectedContest?.name }}</h2>
-      <el-button text type="primary" @click="goBack('contests')">返回</el-button>
+      <div class="oj-heading-copy">
+        <h2>{{ detail?.name || store.selectedContest?.name }}</h2>
+        <p>{{ detail?.description || '考试数据管理与批量评测' }}</p>
+      </div>
+      <div class="contest-heading-actions">
+        <el-button text type="primary" @click="goBack('contests')">返回</el-button>
+        <el-button
+          v-if="store.account?.role === 'admin' && store.selectedContest"
+          text
+          type="danger"
+          :loading="deletingContestID === contestId"
+          :disabled="
+            importing ||
+            enqueuing ||
+            (deletingContestID !== null && deletingContestID !== contestId)
+          "
+          @click="removeContest(detail || store.selectedContest)"
+          >删除比赛</el-button
+        >
+      </div>
     </div>
 
     <div class="oj-card" style="margin-bottom: 16px">
@@ -221,7 +261,12 @@ async function onImportFile(file: any) {
           <div class="action-group">
             <span class="group-label">考试数据</span>
             <el-button @click="exportExam">导出考试包</el-button>
-            <el-upload :auto-upload="false" :show-file-list="false" accept=".zip" :on-change="onImportFile">
+            <el-upload
+              :auto-upload="false"
+              :show-file-list="false"
+              accept=".zip"
+              :on-change="onImportFile"
+            >
               <el-button type="primary" :loading="importing">导入考试数据包</el-button>
             </el-upload>
           </div>
@@ -229,17 +274,30 @@ async function onImportFile(file: any) {
           <div class="action-group">
             <span class="group-label">结果输出</span>
             <el-button :disabled="!hasData">
-              <a :href="`/api/contests/${contestId}/scoreboard.csv`" class="link-plain">导出成绩单 (CSV)</a>
+              <a :href="`/api/contests/${contestId}/scoreboard.csv`" class="link-plain"
+                >导出成绩单 (CSV)</a
+              >
             </el-button>
             <el-button :disabled="!hasData">
-              <a :href="`/api/contests/${contestId}/result-package`" class="link-plain">导出结果包</a>
+              <a :href="`/api/contests/${contestId}/result-package`" class="link-plain"
+                >导出结果包</a
+              >
             </el-button>
-            <a :href="`/api/contests/${contestId}/statement.pdf`" target="_blank" class="el-link el-link--primary">查看题面 PDF</a>
+            <a
+              :href="`/api/contests/${contestId}/statement.pdf`"
+              target="_blank"
+              class="el-link el-link--primary"
+              >查看题面 PDF</a
+            >
           </div>
         </div>
         <div class="meta-row">
-          <el-tag size="small" type="info">题目 {{ detail?.problem_count ?? evaluation.problems.length }}</el-tag>
-          <el-tag size="small" type="info">考生 {{ detail?.contestant_count ?? evaluation.rows.length }}</el-tag>
+          <el-tag size="small" type="info"
+            >题目 {{ detail?.problem_count ?? evaluation.problems.length }}</el-tag
+          >
+          <el-tag size="small" type="info"
+            >考生 {{ detail?.contestant_count ?? evaluation.rows.length }}</el-tag
+          >
         </div>
       </div>
     </div>
@@ -252,19 +310,34 @@ async function onImportFile(file: any) {
         </span>
         <span class="spacer" />
         <template v-if="!filterMode">
-          <el-button type="primary" :disabled="evaluation.pending > 0 || !hasData" @click="enterFilter">筛选测评</el-button>
+          <el-button
+            type="primary"
+            :disabled="evaluation.pending > 0 || !hasData"
+            @click="enterFilter"
+            >筛选测评</el-button
+          >
         </template>
         <template v-else>
           <el-checkbox :model-value="allSelected" @change="selectAll">全选</el-checkbox>
           <el-button @click="exitFilter">取消</el-button>
-          <el-button type="primary" :disabled="selectedCount === 0" :loading="enqueuing" @click="enqueueSelected">
+          <el-button
+            type="primary"
+            :disabled="selectedCount === 0"
+            :loading="enqueuing"
+            @click="enqueueSelected"
+          >
             加入测评队列（{{ selectedCount }}）
           </el-button>
         </template>
       </div>
 
-      <div class="oj-table-wrap">
-        <table v-if="hasData" class="eval-table">
+      <div class="eval-scroll" tabindex="0" aria-label="评测成绩表，可横向滚动">
+        <table
+          v-if="hasData"
+          class="eval-table"
+          :class="{ filtering: filterMode }"
+          :style="{ minWidth: `${428 + evaluation.problems.length * 96}px` }"
+        >
           <thead>
             <tr>
               <th class="col-rank">排名</th>
@@ -272,8 +345,14 @@ async function onImportFile(file: any) {
               <th class="col-name">姓名</th>
               <th v-for="(p, ci) in evaluation.problems" :key="p.problem_id" class="col-prob">
                 <div class="th-inner">
-                  <el-checkbox v-if="filterMode" :model-value="colSelected(ci)" @change="toggleColumn(ci)" />
-                  <span class="prob-label">{{ p.label }}</span>
+                  <el-checkbox
+                    v-if="filterMode"
+                    :model-value="colSelected(ci)"
+                    @change="toggleColumn(ci)"
+                  />
+                  <el-tooltip :content="p.title"
+                    ><span class="prob-label">{{ p.label }}</span></el-tooltip
+                  >
                   <span class="prob-score">{{ p.score }}分</span>
                 </div>
               </th>
@@ -285,7 +364,11 @@ async function onImportFile(file: any) {
               <td class="col-rank">{{ row.has_score ? row.rank : '-' }}</td>
               <td class="col-id">
                 <div class="th-inner">
-                  <el-checkbox v-if="filterMode" :model-value="rowSelected(ri)" @change="toggleRow(ri)" />
+                  <el-checkbox
+                    v-if="filterMode"
+                    :model-value="rowSelected(ri)"
+                    @change="toggleRow(ri)"
+                  />
                   <span class="mono">{{ row.student_id }}</span>
                 </div>
               </td>
@@ -294,11 +377,17 @@ async function onImportFile(file: any) {
                 v-for="(cell, ci) in row.cells"
                 :key="ci"
                 class="col-prob cell"
-                :class="[cellTone(cell, ci), { 'cell-clickable': !filterMode && cell.has_submission }]"
+                :class="[
+                  cellTone(cell, ci),
+                  { 'cell-clickable': !filterMode && cell.has_submission },
+                ]"
                 @click="openSubmission(cell)"
               >
-                <span v-if="cell.has_submission && cell.status === 'waiting'" class="cell-waiting">待测评</span>
+                <span v-if="cell.has_submission && cell.status === 'waiting'" class="cell-waiting"
+                  >待测评</span
+                >
                 <span v-else-if="cell.has_submission" class="cell-score">{{ cell.score }}</span>
+                <span v-else class="cell-empty" aria-label="未提交">—</span>
                 <el-checkbox
                   v-if="filterMode && cell.has_submission"
                   class="cell-check"
@@ -314,11 +403,23 @@ async function onImportFile(file: any) {
           <el-empty description="尚未导入考试数据" :image-size="80" />
         </div>
       </div>
+      <div v-if="hasData" class="score-legend">
+        <span><i class="legend-full" />满分</span><span><i class="legend-partial" />部分得分</span
+        ><span><i class="legend-zero" />零分</span><span><i class="legend-waiting" />待评测</span
+        ><span class="muted">— 未提交</span>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.contest-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .action-bar {
   display: flex;
   align-items: center;
@@ -337,7 +438,7 @@ async function onImportFile(file: any) {
 }
 .group-label {
   font-size: 12.5px;
-  color: #98a2b3;
+  color: var(--oj-text-secondary);
   margin-right: 2px;
 }
 .action-sep {
@@ -358,6 +459,7 @@ async function onImportFile(file: any) {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 .eval-header h3 {
   margin: 0;
@@ -372,43 +474,69 @@ async function onImportFile(file: any) {
   font-size: 13px;
   color: #1c6fe8;
 }
+.eval-scroll {
+  overflow: auto;
+  max-height: 68vh;
+  border-radius: 0 0 8px 8px;
+}
 .eval-table {
   width: 100%;
-  border-collapse: collapse;
+  table-layout: fixed;
+  border-spacing: 0;
 }
 .eval-table th,
 .eval-table td {
-  border: 1px solid #e4e7ed;
-  padding: 6px 8px;
+  border-right: 1px solid var(--oj-border);
+  border-bottom: 1px solid var(--oj-border);
+  padding: 10px 8px;
   font-size: 13px;
   text-align: center;
-  height: 38px;
+  height: 46px;
 }
 .eval-table th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   background: #f6f8fa;
   color: #48525c;
   font-weight: 600;
   white-space: nowrap;
 }
-.col-id,
-.col-name {
+.eval-table .col-id,
+.eval-table .col-name {
   text-align: left;
+  position: sticky;
+  z-index: 2;
+  background: #fff;
+}
+.eval-table th.col-id,
+.eval-table th.col-name,
+.eval-table th.col-total {
+  z-index: 4;
+  background: #f6f8fa;
 }
 .col-rank {
   width: 60px;
 }
 .col-id {
   width: 150px;
+  left: 0;
 }
 .col-name {
-  min-width: 110px;
+  width: 128px;
+  left: 150px;
 }
 .col-total {
   width: 90px;
   font-weight: 600;
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: #f8fafc;
+  box-shadow: -1px 0 0 var(--oj-border);
 }
 .col-prob {
-  min-width: 88px;
+  width: 96px;
 }
 .th-inner {
   display: flex;
@@ -423,8 +551,8 @@ async function onImportFile(file: any) {
   font-weight: 600;
 }
 .prob-score {
-  color: #98a2b3;
-  font-size: 11px;
+  color: var(--oj-text-secondary);
+  font-size: 12px;
 }
 .cell {
   position: relative;
@@ -436,10 +564,18 @@ async function onImportFile(file: any) {
 .cell-score {
   font-family: ui-monospace, Consolas, monospace;
 }
-.tone-full { background: #eefaf2; }
-.tone-partial { background: #fdf6e9; }
-.tone-zero { background: #fdeeee; }
-.tone-waiting { background: #fffdf5; }
+.tone-full {
+  background: #eefaf2;
+}
+.tone-partial {
+  background: #fdf6e9;
+}
+.tone-zero {
+  background: #fdeeee;
+}
+.tone-waiting {
+  background: #fffdf5;
+}
 .cell-clickable {
   cursor: pointer;
 }
@@ -449,12 +585,62 @@ async function onImportFile(file: any) {
 }
 .cell-check {
   position: absolute;
-  top: 0;
-  left: 0;
+  top: 5px;
+  left: 6px;
   height: auto;
   margin: 0;
 }
 .empty-hint {
   padding: 24px;
+}
+.cell-empty {
+  color: #a0a9b7;
+  font-size: 12px;
+}
+.filtering .cell {
+  padding-top: 18px;
+  height: 54px;
+}
+.score-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding: 14px 22px;
+  font-size: 12px;
+  color: var(--oj-text-secondary);
+}
+.score-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.score-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.legend-full {
+  background: #bee2cd;
+}
+.legend-partial {
+  background: #efd7a4;
+}
+.legend-zero {
+  background: #edc1c6;
+}
+.legend-waiting {
+  background: #f5eac0;
+}
+@media (max-width: 760px) {
+  .action-sep {
+    display: none;
+  }
+  .eval-table .col-name {
+    position: static;
+  }
+  .eval-scroll {
+    max-height: 65vh;
+  }
 }
 </style>

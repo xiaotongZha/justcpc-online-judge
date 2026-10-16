@@ -7,12 +7,16 @@ import { store, refresh, type QueueStatus } from '../store'
 const queue = ref<QueueStatus[]>([])
 const loading = ref(false)
 const retrying = ref(false)
+const queueLabels: Record<string, string> = { queued: '排队中', running: '运行中', failed: '失败' }
 
-async function loadQueue() {
+async function loadQueue(manual = false) {
+  if (manual) loading.value = true
   try {
     queue.value = (await api<QueueStatus[]>('/admin/judge-queue')) ?? []
   } catch {
     queue.value = []
+  } finally {
+    if (manual) loading.value = false
   }
 }
 
@@ -46,41 +50,44 @@ onBeforeUnmount(() => clearInterval(timer))
 <template>
   <div>
     <div class="oj-toolbar">
-      <h2>管理员</h2>
-      <el-button :loading="loading" @click="loadQueue">刷新队列</el-button>
-      <el-button type="warning" :loading="retrying" @click="retry">重试失败任务</el-button>
+      <div class="oj-heading-copy">
+        <h2>判题队列</h2>
+        <p>查看任务执行状态与失败记录</p>
+      </div>
+      <el-button :loading="loading" @click="loadQueue(true)"
+        ><el-icon><Refresh /></el-icon>刷新队列</el-button
+      >
+      <el-button type="primary" :disabled="counts.failed === 0" :loading="retrying" @click="retry"
+        >重试失败任务</el-button
+      >
     </div>
-
-    <div class="oj-card" style="margin-bottom: 16px">
+    <div class="oj-card">
       <div class="oj-card-header">
-        <h3>判题队列</h3>
-        <el-tag type="info" size="small" effect="light">排队 {{ counts.queued }}</el-tag>
-        <el-tag type="primary" size="small" effect="light">运行中 {{ counts.running }}</el-tag>
-        <el-tag type="danger" size="small" effect="light">失败 {{ counts.failed }}</el-tag>
+        <h3>任务列表</h3>
+        <el-tag type="info" size="small">排队 {{ counts.queued }}</el-tag
+        ><el-tag type="primary" size="small">运行中 {{ counts.running }}</el-tag
+        ><el-tag type="danger" size="small">失败 {{ counts.failed }}</el-tag>
       </div>
       <div class="oj-table-wrap">
-        <el-table :data="queue" stripe size="small">
-          <el-table-column prop="id" label="任务 ID" width="90" />
+        <el-table :data="queue" v-loading="loading" empty-text="当前没有判题任务">
+          <el-table-column prop="id" label="任务 ID" width="100" />
           <el-table-column prop="submission_id" label="提交 ID" width="110" />
-          <el-table-column label="状态" width="110">
-            <template #default="{ row }">
-              <el-tag :type="row.state === 'failed' ? 'danger' : row.state === 'running' ? 'primary' : 'info'" size="small">
-                {{ row.state }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="attempt" label="尝试" width="90" align="right" />
-          <el-table-column prop="error" label="错误" min-width="260" show-overflow-tooltip />
+          <el-table-column label="状态" width="130"
+            ><template #default="{ row }"
+              ><el-tag
+                :type="
+                  row.state === 'failed' ? 'danger' : row.state === 'running' ? 'primary' : 'info'
+                "
+                size="small"
+                >{{ queueLabels[row.state] }}</el-tag
+              ></template
+            ></el-table-column
+          >
+          <el-table-column prop="attempt" label="尝试次数" width="110" align="right" />
+          <el-table-column prop="error" label="错误信息" min-width="260" show-overflow-tooltip />
         </el-table>
       </div>
-    </div>
-
-    <div class="oj-card">
-      <div class="oj-card-body">
-        <p class="muted" style="margin: 0">
-          判题任务由 SQLite 队列持久化，执行引擎仅同步执行；服务重启后未完成任务自动恢复。失败任务保留在此，可重新入队。
-        </p>
-      </div>
+      <div class="oj-card-footer">失败任务保留在队列中，可重新加入评测；状态自动刷新。</div>
     </div>
   </div>
 </template>

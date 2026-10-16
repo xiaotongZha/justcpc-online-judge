@@ -6,7 +6,13 @@ import { store, navigate, type Submission } from '../store'
 import StatusTag from '../components/StatusTag.vue'
 import LanguageTag from '../components/LanguageTag.vue'
 
-type SubmissionPage = { items: Submission[]; total: number; waiting: number; page: number; page_size: number }
+type SubmissionPage = {
+  items: Submission[]
+  total: number
+  waiting: number
+  page: number
+  page_size: number
+}
 
 const statusFilter = ref('all')
 const languageFilter = ref('all')
@@ -94,44 +100,67 @@ async function openDetail(id: number) {
 <template>
   <div>
     <div class="oj-toolbar">
-      <h2>提交</h2>
+      <div class="oj-heading-copy">
+        <h2>
+          提交记录 <span class="oj-count">{{ total }}</span>
+        </h2>
+        <p>查看自测与比赛提交的评测结果</p>
+      </div>
       <el-tag v-if="waiting > 0" type="warning" size="small" effect="light" round>
         {{ waiting }} 条等待判题中…
       </el-tag>
-      <el-button size="small" :loading="refreshing" @click="load(true)">
+      <el-button :loading="refreshing" @click="load(true)">
         <el-icon style="margin-right: 4px"><Refresh /></el-icon>刷新
       </el-button>
     </div>
 
     <div class="oj-card">
       <div class="oj-filters">
-        <el-select v-model="statusFilter">
+        <el-select v-model="statusFilter" aria-label="筛选状态">
           <el-option label="全部状态" value="all" />
           <el-option label="AC" value="AC" />
           <el-option label="WA" value="WA" />
           <el-option label="CE" value="CE" />
-          <el-option label="WAIT" value="waiting" />
+          <el-option label="等待评测" value="waiting" />
         </el-select>
-        <el-select v-model="languageFilter">
+        <el-select v-model="languageFilter" aria-label="筛选语言">
           <el-option label="全部语言" value="all" />
           <el-option label="C++" value="cpp" />
           <el-option label="Java" value="java" />
           <el-option label="Python 3" value="python3" />
         </el-select>
-        <el-select v-model="problemFilter" class="wide">
+        <el-select v-model="problemFilter" class="wide" aria-label="筛选题目" filterable>
           <el-option label="全部题目" :value="0" />
-          <el-option v-for="p in store.problems" :key="p.id" :label="`#${p.id} ${p.title}`" :value="p.id" />
+          <el-option
+            v-for="p in store.problems"
+            :key="p.id"
+            :label="`#${p.id} ${p.title}`"
+            :value="p.id"
+          />
         </el-select>
-        <el-input v-model="keyword" placeholder="搜索题目 / 提交者" clearable style="width: 200px">
-          <template #prefix><el-icon><Search /></el-icon></template>
+        <el-input
+          v-model="keyword"
+          placeholder="搜索题目 / 提交者"
+          aria-label="搜索提交"
+          clearable
+          class="search-input"
+        >
+          <template #prefix
+            ><el-icon><Search /></el-icon
+          ></template>
         </el-input>
       </div>
 
       <div class="oj-table-wrap">
-        <el-table :data="items" stripe size="small" v-loading="loading || refreshing">
+        <el-table :data="items" v-loading="loading || refreshing" empty-text="没有匹配的提交记录">
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column prop="submitter" label="提交者" min-width="130" show-overflow-tooltip />
-          <el-table-column prop="problem_title" label="题目" min-width="200" show-overflow-tooltip />
+          <el-table-column
+            prop="problem_title"
+            label="题目"
+            min-width="200"
+            show-overflow-tooltip
+          />
           <el-table-column label="语言" width="110">
             <template #default="{ row }"><LanguageTag :language="row.language" /></template>
           </el-table-column>
@@ -139,12 +168,16 @@ async function openDetail(id: number) {
             <template #default="{ row }"><StatusTag :status="row.status" /></template>
           </el-table-column>
           <el-table-column prop="score" label="分数" width="100" align="right">
-            <template #default="{ row }"><span class="mono">{{ row.score }}</span></template>
+            <template #default="{ row }"
+              ><span class="mono">{{ row.score }}</span></template
+            >
           </el-table-column>
           <el-table-column prop="submitted_at" label="提交时间" width="170" />
-          <el-table-column label="" width="70">
+          <el-table-column label="操作" width="90" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" text type="primary" @click="openDetail(row.id)">详情</el-button>
+              <el-button size="small" text type="primary" @click="openDetail(row.id)"
+                >详情</el-button
+              >
             </template>
           </el-table-column>
         </el-table>
@@ -165,11 +198,3 @@ async function openDetail(id: number) {
     </div>
   </div>
 </template>
-
-<style scoped>
-.oj-pagination {
-  display: flex;
-  justify-content: flex-end;
-  padding: 14px 16px;
-}
-</style>

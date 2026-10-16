@@ -28,6 +28,7 @@ type config struct {
 	Data                 string `json:"data"`
 	Listen               string `json:"listen"`
 	JudgeURL             string `json:"judge_url"`
+	JudgeWorkers         int    `json:"judge_workers"`
 	WebDist              string `json:"web_dist"`
 	SessionSecret        string `json:"session_secret"`
 	InitialAdminPassword string `json:"initial_admin_password"`
@@ -35,10 +36,11 @@ type config struct {
 
 func defaultConfig() config {
 	return config{
-		Data:     "./data",
-		Listen:   "127.0.0.1:18081",
-		JudgeURL: "http://127.0.0.1:18080",
-		WebDist:  "./web/dist",
+		Data:         "./data",
+		Listen:       "127.0.0.1:18081",
+		JudgeURL:     "http://127.0.0.1:18080",
+		JudgeWorkers: 0,
+		WebDist:      "./web/dist",
 	}
 }
 
@@ -56,6 +58,9 @@ func loadConfig(path string) (config, error) {
 	}
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return cfg, err
+	}
+	if cfg.JudgeWorkers < 0 {
+		return cfg, errors.New("judge_workers must be non-negative (0 means automatic)")
 	}
 	if cfg.SessionSecret == "" {
 		cfg.SessionSecret = os.Getenv("JUSTCPC_SESSION_SECRET")
@@ -96,7 +101,7 @@ func main() {
 	}
 	problems := problem.Service{Store: storage}
 	submissions := submission.Service{Store: storage, Problems: problems}
-	dispatcher := judge.Dispatcher{Store: storage, Submissions: submissions, Problems: problems, Client: judge.Client{URL: cfg.JudgeURL}, Workers: 10}
+	dispatcher := judge.Dispatcher{Store: storage, Submissions: submissions, Problems: problems, Client: judge.Client{URL: cfg.JudgeURL}, Workers: cfg.JudgeWorkers}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	go func() {
@@ -107,7 +112,7 @@ func main() {
 	server := web.Server{Accounts: accounts, Sessions: sessions, Problems: problems, Submissions: submissions, Contests: contest.Service{Store: storage}, Store: storage, Dispatcher: &dispatcher, WebDist: cfg.WebDist}
 	httpServer := &http.Server{Addr: cfg.Listen, Handler: server.Handler()}
 	go func() {
-		log.Printf("JustCPC OJ listening on %s (config %s)", cfg.Listen, configPath)
+		log.Printf("JustCPC OJ listening on %s (config %s; judge_workers=%d, 0=auto)", cfg.Listen, configPath, cfg.JudgeWorkers)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("http server: %v", err)
 		}

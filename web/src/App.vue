@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from './api'
-import { store, knownTabs, refresh, navigate, goBack, restoreHistory, resetSession } from './store'
+import { store, knownTabs, refresh, navigate, restoreHistory, resetSession } from './store'
 import Users from './views/Users.vue'
 import Problems from './views/Problems.vue'
 import ProblemView from './views/ProblemView.vue'
@@ -19,12 +19,18 @@ const loggingIn = ref(false)
 
 const navTabs = computed(() => {
   const tabs = [
-    { key: 'users', label: '用户' },
-    { key: 'problems', label: '题目' },
-    { key: 'submissions', label: '提交' },
-    { key: 'contests', label: '比赛' },
+    { key: 'problems', label: '题目库', icon: 'Document', group: 'workspace' },
+    { key: 'contests', label: '比赛管理', icon: 'Trophy', group: 'workspace' },
+    { key: 'submissions', label: '提交记录', icon: 'Tickets', group: 'workspace' },
   ]
-  if (store.account?.role === 'admin') tabs.push({ key: 'admin', label: '管理员' })
+  if (store.account?.role === 'admin')
+    tabs.push({ key: 'admin', label: '判题队列', icon: 'Monitor', group: 'system' })
+  tabs.push({
+    key: 'users',
+    label: store.account?.role === 'admin' ? '账户管理' : '我的账户',
+    icon: 'User',
+    group: 'system',
+  })
   return tabs
 })
 
@@ -37,7 +43,20 @@ const isActive = (key: string) =>
         ? store.tab.startsWith('contest')
         : store.tab === key
 
-const canGoBack = computed(() => store.navigation.length > 0)
+const activeNav = computed(() => navTabs.value.find((tab) => isActive(tab.key)))
+const detailLabels: Record<string, string> = {
+  'problem-view': '题目详情',
+  'submission-detail': '提交详情',
+  'contest-create': '新建比赛',
+  'contest-detail': '比赛详情',
+}
+const detailLabel = computed(() =>
+  store.tab === 'problem-edit'
+    ? store.editTargetID
+      ? '编辑题目'
+      : '新建题目'
+    : detailLabels[store.tab],
+)
 
 async function login() {
   loggingIn.value = true
@@ -89,17 +108,25 @@ onMounted(async () => {
   <div v-if="!store.account" class="login">
     <div class="login-card">
       <div class="brand">
-        <span class="logo">J</span>
+        <span class="logo">J</span
+        ><span>JustCPC<span class="brand-caption">试题组工作台</span></span>
       </div>
       <h1>JustCPC Online Judge</h1>
       <p class="hint">命题、自测与赛后批量测评工作台</p>
-      <el-form @submit.prevent="login">
-        <el-form-item>
-          <el-input v-model="loginForm.username" placeholder="用户名" size="large" autocomplete="username">
-            <template #prefix><el-icon><User /></el-icon></template>
+      <el-form label-position="top" @submit.prevent="login">
+        <el-form-item label="用户名">
+          <el-input
+            v-model="loginForm.username"
+            placeholder="用户名"
+            size="large"
+            autocomplete="username"
+          >
+            <template #prefix
+              ><el-icon><User /></el-icon
+            ></template>
           </el-input>
         </el-form-item>
-        <el-form-item>
+        <el-form-item label="密码">
           <el-input
             v-model="loginForm.password"
             type="password"
@@ -107,12 +134,19 @@ onMounted(async () => {
             size="large"
             show-password
             autocomplete="current-password"
-            @keyup.enter="login"
           >
-            <template #prefix><el-icon><Lock /></el-icon></template>
+            <template #prefix
+              ><el-icon><Lock /></el-icon
+            ></template>
           </el-input>
         </el-form-item>
-        <el-button type="primary" size="large" style="width: 100%" :loading="loggingIn" native-type="submit">
+        <el-button
+          type="primary"
+          size="large"
+          style="width: 100%"
+          :loading="loggingIn"
+          native-type="submit"
+        >
           登录
         </el-button>
       </el-form>
@@ -120,39 +154,71 @@ onMounted(async () => {
   </div>
 
   <div v-else class="shell">
-    <header class="oj-header">
+    <aside class="oj-sidebar">
       <div class="brand">
         <span class="logo">J</span>
-        <span>JustCPC OJ</span>
+        <span>JustCPC<span class="brand-caption">试题组工作台</span></span>
       </div>
-      <nav class="oj-nav">
-        <button
-          v-for="t in navTabs"
-          :key="t.key"
-          :class="{ active: isActive(t.key) }"
-          @click="navigate(t.key)"
-        >
-          {{ t.label }}
-        </button>
-      </nav>
-      <div class="user">
-        <el-icon><UserFilled /></el-icon>
-        <span>{{ store.account.username }}</span>
-        <el-button text size="small" style="color: var(--oj-header-fg)" @click="logout">退出</el-button>
+      <template
+        v-for="group in [
+          { key: 'workspace', label: '工作区' },
+          { key: 'system', label: '系统' },
+        ]"
+        :key="group.key"
+      >
+        <div class="oj-nav-label">{{ group.label }}</div>
+        <nav class="oj-nav" :aria-label="group.label">
+          <button
+            v-for="t in navTabs.filter((tab) => tab.group === group.key)"
+            :key="t.key"
+            :class="{ active: isActive(t.key) }"
+            :aria-current="isActive(t.key) ? 'page' : undefined"
+            @click="navigate(t.key)"
+          >
+            <el-icon><component :is="t.icon" /></el-icon><span>{{ t.label }}</span>
+          </button>
+        </nav>
+      </template>
+      <div class="oj-sidebar-account">
+        <el-avatar :size="34">{{ store.account.username.slice(0, 1).toUpperCase() }}</el-avatar>
+        <div class="oj-account-copy">
+          <strong>{{ store.account.username }}</strong
+          ><span>{{ store.account.role === 'admin' ? '管理员' : '普通用户' }}</span>
+        </div>
+        <el-tooltip content="退出登录" placement="top"
+          ><el-button text circle aria-label="退出登录" @click="logout"
+            ><el-icon><SwitchButton /></el-icon></el-button
+        ></el-tooltip>
       </div>
-    </header>
+    </aside>
 
-    <main class="oj-page">
-      <Users v-if="store.tab === 'users'" />
-      <Problems v-else-if="store.tab === 'problems'" />
-      <ProblemView v-else-if="store.tab === 'problem-view'" />
-      <ProblemEdit v-else-if="store.tab === 'problem-edit'" />
-      <Submissions v-else-if="store.tab === 'submissions'" />
-      <SubmissionDetail v-else-if="store.tab === 'submission-detail'" />
-      <Contests v-else-if="store.tab === 'contests'" />
-      <ContestCreate v-else-if="store.tab === 'contest-create'" />
-      <ContestDetail v-else-if="store.tab === 'contest-detail'" />
-      <Admin v-else-if="store.tab === 'admin'" />
-    </main>
+    <div class="oj-workspace">
+      <header class="oj-header">
+        <nav class="oj-breadcrumb" aria-label="当前位置">
+          <span>{{ activeNav?.group === 'system' ? '系统' : '工作区' }}</span
+          ><el-icon><ArrowRight /></el-icon>
+          <button v-if="detailLabel" @click="navigate(activeNav?.key ?? 'problems')">
+            {{ activeNav?.label }}
+          </button>
+          <strong v-else>{{ activeNav?.label }}</strong>
+          <template v-if="detailLabel"
+            ><el-icon><ArrowRight /></el-icon><strong>{{ detailLabel }}</strong></template
+          >
+        </nav>
+        <span class="oj-header-caption">JustCPC Online Judge</span>
+      </header>
+      <main class="oj-page">
+        <Users v-if="store.tab === 'users'" />
+        <Problems v-else-if="store.tab === 'problems'" />
+        <ProblemView v-else-if="store.tab === 'problem-view'" />
+        <ProblemEdit v-else-if="store.tab === 'problem-edit'" />
+        <Submissions v-else-if="store.tab === 'submissions'" />
+        <SubmissionDetail v-else-if="store.tab === 'submission-detail'" />
+        <Contests v-else-if="store.tab === 'contests'" />
+        <ContestCreate v-else-if="store.tab === 'contest-create'" />
+        <ContestDetail v-else-if="store.tab === 'contest-detail'" />
+        <Admin v-else-if="store.tab === 'admin'" />
+      </main>
+    </div>
   </div>
 </template>

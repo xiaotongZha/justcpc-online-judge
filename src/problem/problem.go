@@ -273,9 +273,7 @@ func (s Service) UploadTestdata(ctx context.Context, id, actorID int64, archive 
 		if err != nil {
 			return err
 		}
-		if len(data) == 0 {
-			return fmt.Errorf("test file %q is empty", file.Name)
-		}
+		// 无输入题以及预期无输出的测试点允许空文件；配对和连续编号仍在下方校验。
 		if err := os.WriteFile(filepath.Join(stage, file.Name), data, 0600); err != nil {
 			return err
 		}

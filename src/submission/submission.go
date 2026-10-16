@@ -184,7 +184,7 @@ func (s Service) Detail(ctx context.Context, id, accountID int64, isAdmin bool) 
 	var sourcePath string
 	var result sql.NullString
 	var judged sql.NullString
-	err := s.Store.DB.QueryRowContext(ctx, `SELECT s.id,s.problem_id,COALESCE(p.title,''),COALESCE(a.username,ct.student_id),s.language,s.status,COALESCE(s.score,0),s.submitted_at,s.judged_at,s.source_path,s.judge_result_json,p.owner_account_id,s.account_id FROM submissions s JOIN problems p ON p.id=s.problem_id LEFT JOIN accounts a ON a.id=s.account_id LEFT JOIN contestants ct ON ct.id=s.contestant_id WHERE s.id=?`, id).Scan(&item.ID, &item.ProblemID, &item.ProblemTitle, &item.Submitter, &item.Language, &item.Status, &item.Score, &item.SubmittedAt, &judged, &sourcePath, &result, &owner, &submitter)
+	err := s.Store.DB.QueryRowContext(ctx, `SELECT s.id,s.problem_id,COALESCE(p.title,''),COALESCE(a.username,ct.student_id),s.language,s.status,COALESCE(s.score,0),s.submitted_at,s.judged_at,s.source_path,s.judge_result_json,p.owner_account_id,s.account_id,s.contestant_id IS NOT NULL FROM submissions s JOIN problems p ON p.id=s.problem_id LEFT JOIN accounts a ON a.id=s.account_id LEFT JOIN contestants ct ON ct.id=s.contestant_id WHERE s.id=?`, id).Scan(&item.ID, &item.ProblemID, &item.ProblemTitle, &item.Submitter, &item.Language, &item.Status, &item.Score, &item.SubmittedAt, &judged, &sourcePath, &result, &owner, &submitter, &item.IsContestant)
 	if err != nil {
 		return item, err
 	}
@@ -206,6 +206,8 @@ func (s Service) Detail(ctx context.Context, id, accountID int64, isAdmin bool) 
 	return item, nil
 }
 
+// LoadExecution uses the contest's maximum score for contestant submissions
+// and the problem's default score for ordinary submissions.
 func (s Service) LoadExecution(ctx context.Context, submissionID int64) (Submission, problem.Problem, string, error) {
 	var p problem.Problem
 	var language, sourcePath string
@@ -213,7 +215,13 @@ func (s Service) LoadExecution(ctx context.Context, submissionID int64) (Submiss
 	var limits string
 	var compare string
 	var owner sql.NullInt64
-	err := s.Store.DB.QueryRowContext(ctx, `SELECT s.language,s.source_path,p.id,p.title,p.statement_markdown,p.score,p.resource_limits_json,COALESCE(p.compare_json,'{}'),COALESCE(p.testdata_path,''),p.owner_account_id,p.created_at,p.updated_at FROM submissions s JOIN problems p ON p.id=s.problem_id WHERE s.id=?`, submissionID).Scan(&language, &sourcePath, &p.ID, &p.Title, &p.StatementMarkdown, &score, &limits, &compare, &p.TestdataPath, &owner, &p.CreatedAt, &p.UpdatedAt)
+	err := s.Store.DB.QueryRowContext(ctx, `SELECT s.language,s.source_path,p.id,p.title,p.statement_markdown,
+		COALESCE(cp.score_cents,p.score),p.resource_limits_json,COALESCE(p.compare_json,'{}'),
+		COALESCE(p.testdata_path,''),p.owner_account_id,p.created_at,p.updated_at
+		FROM submissions s JOIN problems p ON p.id=s.problem_id
+		LEFT JOIN contestants ct ON ct.id=s.contestant_id
+		LEFT JOIN contest_problems cp ON cp.contest_id=ct.contest_id AND cp.problem_id=p.id
+		WHERE s.id=?`, submissionID).Scan(&language, &sourcePath, &p.ID, &p.Title, &p.StatementMarkdown, &score, &limits, &compare, &p.TestdataPath, &owner, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return Submission{}, p, "", err
 	}

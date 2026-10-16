@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,8 +18,9 @@ import (
 )
 
 const (
-	leaseDuration = 15 * time.Minute
-	pollInterval  = 500 * time.Millisecond
+	leaseDuration    = 15 * time.Minute
+	pollInterval     = 500 * time.Millisecond
+	recoveryInterval = 30 * time.Second
 )
 
 type Dispatcher struct {
@@ -68,14 +70,11 @@ func (d *Dispatcher) RetryFailed(ctx context.Context) (int64, error) {
 }
 
 func (d *Dispatcher) Run(ctx context.Context) error {
-	if d.Workers <= 0 {
-		d.Workers = 10
+	if d.Workers < 0 {
+		return errors.New("judge workers must be non-negative (0 means automatic)")
 	}
-	if d.Workers > 10 {
-		d.Workers = 10
-	}
-	if _, err := d.Store.DB.ExecContext(ctx, `UPDATE judge_queue SET state='queued',lease_until=NULL,started_at=NULL WHERE state='running' AND lease_until < ?`, store.Now()); err != nil {
-		return fmt.Errorf("recover expired judge tasks: %w", err)
+	if err := d.recoverExpired(ctx); err != nil {
+		return err
 	}
 	// A normal submission writes its source before its queue row. If the process
 	// stops in that narrow interval, restore the durable task at next startup.
@@ -87,13 +86,63 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 		WHERE s.account_id IS NOT NULL AND s.status='waiting' AND q.id IS NULL`, store.Now()); err != nil {
 		return fmt.Errorf("recover normal submission tasks: %w", err)
 	}
+	workerCount, err := d.resolveWorkers(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
 	var workers sync.WaitGroup
-	for range d.Workers {
+	for range workerCount {
 		workers.Add(1)
 		go func() { defer workers.Done(); d.worker(ctx) }()
 	}
-	<-ctx.Done()
-	workers.Wait()
+	defer workers.Wait()
+	ticker := time.NewTicker(recoveryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := d.recoverExpired(ctx); err != nil {
+				log.Printf("%v", err)
+			}
+		}
+	}
+}
+
+func (d *Dispatcher) resolveWorkers(ctx context.Context) (int, error) {
+	if d.Workers > 0 {
+		log.Printf("judge dispatcher capacity: mode=manual workers=%d", d.Workers)
+		return d.Workers, nil
+	}
+	for {
+		workers, err := d.Client.Capacity(ctx)
+		if err == nil {
+			log.Printf("judge dispatcher capacity: mode=auto workers=%d (reported by engine)", workers)
+			return workers, nil
+		}
+		if errors.Is(err, ErrCapacityUnsupported) {
+			log.Printf("judge dispatcher capacity: old engine has no capacity endpoint; using 1 worker")
+			return 1, nil
+		}
+		log.Printf("waiting for judge engine capacity; submissions remain queued: %v", err)
+		timer := time.NewTimer(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return 0, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (d *Dispatcher) recoverExpired(ctx context.Context) error {
+	if _, err := d.Store.DB.ExecContext(ctx, `UPDATE judge_queue SET state='queued',lease_until=NULL,started_at=NULL WHERE state='running' AND lease_until <= ?`, store.Now()); err != nil {
+		return fmt.Errorf("recover expired judge tasks: %w", err)
+	}
 	return nil
 }
 
@@ -169,6 +218,11 @@ func (d *Dispatcher) execute(ctx context.Context, task queueTask) {
 	response, busy, err := d.Client.Execute(ctx, Task{ProblemID: fmt.Sprint(p.ID), Language: sub.Language, Source: source, Problem: Problem{ID: fmt.Sprint(p.ID), Limits: limits, Compare: CompareOption{FloatingPoint: p.Compare.FloatingPoint, Epsilon: p.Compare.Epsilon}, Cases: engineCases}, OutputDir: d.Store.Absolute(outputRelative)})
 	if busy {
 		d.release(ctx, task.ID)
+		// 满载时先等待一个轮询周期，避免立即抢回同一任务并密集请求引擎。
+		select {
+		case <-ctx.Done():
+		case <-time.After(pollInterval):
+		}
 		return
 	}
 	if err != nil {

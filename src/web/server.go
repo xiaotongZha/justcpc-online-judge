@@ -71,6 +71,7 @@ func (s Server) Handler() *gin.Engine {
 	auth.DELETE("/contests/:id", s.adminOnly, s.deleteContest)
 	auth.GET("/contest-roster-example.csv", s.rosterExampleCSV)
 	auth.GET("/contest-roster-example.xlsx", s.rosterExampleXLSX)
+	auth.POST("/contest-roster-preview", s.adminOnly, s.previewContestRoster)
 	auth.GET("/contests/:id", s.getContest)
 	auth.GET("/contests/:id/statement.pdf", s.contestStatementPDF)
 	auth.POST("/contests/:id/export-exam", s.adminOnly, s.exportExam)
@@ -364,6 +365,28 @@ func (s Server) rosterExampleXLSX(c *gin.Context) {
 	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	c.Header("Content-Disposition", `attachment; filename="roster-example.xlsx"`)
 	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", data)
+}
+func (s Server) previewContestRoster(c *gin.Context) {
+	name, data, err := formFile(c, "roster")
+	if err != nil {
+		fail(c, errors.New("请选择名单文件（xlsx 或 csv）"))
+		return
+	}
+	entries, err := contest.ParseRoster(name, data)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	type previewEntry struct {
+		StudentID       string `json:"student_id"`
+		Name            string `json:"name"`
+		DefaultPassword bool   `json:"default_password"`
+	}
+	preview := make([]previewEntry, 0, len(entries))
+	for _, entry := range entries {
+		preview = append(preview, previewEntry{StudentID: entry.StudentID, Name: entry.Name, DefaultPassword: entry.Password == ""})
+	}
+	c.JSON(http.StatusOK, gin.H{"total": len(preview), "entries": preview})
 }
 func (s Server) getContest(c *gin.Context) {
 	detail, err := s.Contests.Detail(c, number(c, "id"))

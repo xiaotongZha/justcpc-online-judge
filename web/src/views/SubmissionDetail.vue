@@ -7,12 +7,14 @@ import StatusTag from '../components/StatusTag.vue'
 import LanguageTag from '../components/LanguageTag.vue'
 
 const sub = computed(() => store.selectedSubmission)
-const passed = computed(() => (sub.value?.judge_result_json?.cases ?? []).filter((c) => c.verdict === 'AC').length)
+const passed = computed(
+  () => (sub.value?.judge_result_json?.cases ?? []).filter((c) => c.verdict === 'AC').length,
+)
 const total = computed(() => (sub.value?.judge_result_json?.cases ?? []).length)
 const hasCompileLog = computed(() => Boolean(sub.value?.judge_result_json?.compile_log))
 
 function verdictClass(verdict: string) {
-  return verdict === 'AC' ? 'oj-log-ok' : verdict === 'WA' ? 'oj-log-bad' : verdict === 'CE' ? 'oj-log-bad' : ''
+  return verdict === 'AC' ? 'oj-log-ok' : 'oj-log-bad'
 }
 
 async function openProblem() {
@@ -50,70 +52,110 @@ onBeforeUnmount(() => clearInterval(timer))
 <template>
   <div v-if="sub">
     <div class="oj-toolbar">
-      <h2>提交 #{{ sub.id }}</h2>
-      <el-tag v-if="sub.status === 'waiting'" type="warning" size="small" effect="light" round>
-        判题中，结果自动刷新…
-      </el-tag>
-      <el-button text type="primary" @click="goBack('submissions')">返回</el-button>
+      <div class="oj-heading-copy">
+        <h2>提交 #{{ sub.id }}</h2>
+        <p>评测结果与逐测试点记录</p>
+      </div>
+      <el-tag v-if="sub.status === 'waiting'" type="warning" size="small">结果自动刷新</el-tag>
+      <el-button @click="goBack('submissions')"
+        ><el-icon><ArrowLeft /></el-icon>返回</el-button
+      >
     </div>
-
-    <div class="oj-card" style="margin-bottom: 16px">
+    <div class="oj-card">
       <div class="oj-card-body">
-        <el-descriptions :column="3" border size="small">
-          <el-descriptions-item label="题目">
-            <el-link type="primary" @click="openProblem">{{ sub.problem_title }}</el-link>
-          </el-descriptions-item>
-          <el-descriptions-item label="提交者">{{ sub.submitter }}</el-descriptions-item>
-          <el-descriptions-item label="语言"><LanguageTag :language="sub.language" /></el-descriptions-item>
-          <el-descriptions-item label="状态"><StatusTag :status="sub.status" /></el-descriptions-item>
-          <el-descriptions-item label="分数">
-            <span class="mono">{{ sub.score }}</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="通过点">
-            <span v-if="total > 0" class="mono">{{ passed }} / {{ total }}</span>
-            <span v-else class="muted">—</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="提交时间">{{ sub.submitted_at }}</el-descriptions-item>
-          <el-descriptions-item label="判题时间">{{ sub.judged_at || '—' }}</el-descriptions-item>
-        </el-descriptions>
+        <div class="oj-result-summary">
+          <StatusTag :status="sub.status" />
+          <div class="oj-result-score">
+            {{ sub.status === 'waiting' ? '—' : sub.score }}<span>分</span>
+          </div>
+          <span v-if="sub.status !== 'waiting' && total > 0" class="oj-result-passed"
+            >通过 <strong class="mono">{{ passed }} / {{ total }}</strong> 个测试点</span
+          >
+          <span v-else-if="sub.status === 'waiting'" class="oj-result-passed">等待评测完成</span>
+        </div>
+        <dl class="oj-details-grid">
+          <div>
+            <dt>题目</dt>
+            <dd>
+              <el-link type="primary" @click="openProblem">{{ sub.problem_title }}</el-link>
+            </dd>
+          </div>
+          <div>
+            <dt>提交者</dt>
+            <dd>{{ sub.submitter }}</dd>
+          </div>
+          <div>
+            <dt>语言</dt>
+            <dd><LanguageTag :language="sub.language" /></dd>
+          </div>
+          <div>
+            <dt>提交时间</dt>
+            <dd>{{ sub.submitted_at }}</dd>
+          </div>
+          <div>
+            <dt>判题时间</dt>
+            <dd>{{ sub.judged_at || '—' }}</dd>
+          </div>
+        </dl>
       </div>
     </div>
-
-    <div v-if="hasCompileLog" class="oj-card" style="margin-bottom: 16px">
-      <div class="oj-card-header"><h3>编译信息</h3></div>
-      <div class="oj-card-body"><pre class="oj-pre oj-log-bad">{{ sub.judge_result_json?.compile_log }}</pre></div>
+    <div v-if="hasCompileLog" class="oj-card">
+      <div class="oj-card-header">
+        <h3>编译信息</h3>
+        <el-tag type="danger" size="small">编译诊断</el-tag>
+      </div>
+      <div class="oj-card-body">
+        <pre class="oj-pre oj-log-bad">{{ sub.judge_result_json?.compile_log }}</pre>
+      </div>
     </div>
-
-    <div class="oj-card" style="margin-bottom: 16px">
-      <div class="oj-card-header"><h3>逐测试点</h3></div>
-      <div class="oj-table-wrap">
-        <el-table :data="sub.judge_result_json?.cases ?? []" stripe size="small" border>
-          <el-table-column prop="id" label="点" width="80" />
-          <el-table-column label="结果" width="110">
-            <template #default="{ row }"><StatusTag :status="row.verdict" /></template>
-          </el-table-column>
-          <el-table-column label="CPU 时间" width="110">
-            <template #default="{ row }"><span class="mono">{{ row.time_ms }} ms</span></template>
-          </el-table-column>
-          <el-table-column label="内存" width="130">
-            <template #default="{ row }">
-              <span class="mono">{{ (row.memory / 1024).toFixed(0) }} KB</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="信息" min-width="240">
-            <template #default="{ row }">
-              <span v-if="row.error" :class="verdictClass(row.verdict)">{{ row.error }}</span>
-              <span v-else-if="row.stderr" class="muted small">{{ row.stderr }}</span>
-              <span v-else class="muted">—</span>
-            </template>
-          </el-table-column>
+    <div class="oj-card">
+      <div class="oj-card-header">
+        <h3>逐测试点</h3>
+        <span v-if="total" class="small muted">共 {{ total }} 个测试点</span>
+      </div>
+      <div v-if="!total" class="oj-empty-state">
+        {{
+          sub.status === 'CE'
+            ? '编译失败，未执行测试点'
+            : sub.status === 'waiting'
+              ? '评测完成后显示测试点结果'
+              : '暂无测试点结果'
+        }}
+      </div>
+      <div v-else class="oj-table-wrap">
+        <el-table :data="sub.judge_result_json?.cases ?? []">
+          <el-table-column prop="id" label="测试点" width="100" />
+          <el-table-column label="结果" width="110"
+            ><template #default="{ row }"><StatusTag :status="row.verdict" /></template
+          ></el-table-column>
+          <el-table-column label="CPU 时间" width="130"
+            ><template #default="{ row }"
+              ><span class="mono">{{ row.time_ms }} ms</span></template
+            ></el-table-column
+          >
+          <el-table-column label="内存" width="140"
+            ><template #default="{ row }"
+              ><span class="mono">{{ (row.memory / 1024).toFixed(0) }} KB</span></template
+            ></el-table-column
+          >
+          <el-table-column label="诊断信息" min-width="240"
+            ><template #default="{ row }"
+              ><span v-if="row.error" :class="verdictClass(row.verdict)">{{ row.error }}</span
+              ><span v-else-if="row.stderr" class="muted small">{{ row.stderr }}</span
+              ><span v-else class="muted">—</span></template
+            ></el-table-column
+          >
         </el-table>
       </div>
     </div>
-
     <div class="oj-card">
-      <div class="oj-card-header"><h3>源码</h3></div>
-      <div class="oj-card-body"><pre class="oj-pre oj-source">{{ sub.source }}</pre></div>
+      <div class="oj-card-header">
+        <h3>提交源码</h3>
+        <LanguageTag :language="sub.language" />
+      </div>
+      <div class="oj-card-body">
+        <pre class="oj-pre">{{ sub.source }}</pre>
+      </div>
     </div>
   </div>
 </template>

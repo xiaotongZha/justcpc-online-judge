@@ -97,6 +97,12 @@ export const statusType: Record<string, string> = {
   AC: 'success',
   WA: 'danger',
   CE: 'warning',
+  TLE: 'danger',
+  MLE: 'danger',
+  RE: 'danger',
+  OLE: 'danger',
+  SYS: 'danger',
+  SE: 'danger',
   waiting: 'info',
 }
 
@@ -150,9 +156,11 @@ export function resetSession() {
 
 export function navigate(next: string) {
   if (store.tab === next) return
+  history.replaceState({ ...history.state, scrollY: window.scrollY }, '')
   store.navigation.push(store.tab)
   store.tab = next
   history.pushState({ justcpc: true, tab: next }, '', `#${next}`)
+  window.scrollTo({ top: 0, behavior: 'instant' })
 }
 
 export function goBack(fallback = 'problems') {
@@ -171,4 +179,7 @@ export function restoreHistory(next: string) {
     store.navigation.push(store.tab)
   }
   store.tab = next
+  requestAnimationFrame(() =>
+    window.scrollTo({ top: history.state?.scrollY ?? 0, behavior: 'instant' }),
+  )
 }
