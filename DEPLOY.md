@@ -10,8 +10,8 @@ sudo apt-get install -y curl ca-certificates
 mkdir -p ~/justcpc/online-judge
 cd ~/justcpc/online-judge
 
-release_url=https://github.com/xiaotongZha/justcpc-online-judge/releases/download/v0.2.0
-archive=JustCPC-OJ-0.2.0-linux-amd64.tar.gz
+release_url=https://github.com/xiaotongZha/justcpc-online-judge/releases/download/v0.2.1
+archive=JustCPC-OJ-0.2.1-linux-amd64.tar.gz
 curl -fLO "$release_url/$archive"
 curl -fLO "$release_url/$archive.sha256"
 sha256sum -c "$archive.sha256" && tar -xzf "$archive" --strip-components=1
@@ -20,7 +20,9 @@ sudo ./install-service.sh
 sudo journalctl -u justcpc-online-judge -g '初始管理员' --no-pager
 ```
 
-首次自动生成 `config.json`，日志显示 `admin` 初始密码。访问 `http://服务器IP:18081`，登录后改密码。服务后台运行、开机自启。
+首次自动生成 `config.json`，日志显示 `admin` 初始密码。服务后台运行、开机自启。
+
+公网访问：将 `config.json` 的 `listen` 改为 `0.0.0.0:18081`，重启 OJ，并在云防火墙及已启用的系统防火墙放行 TCP 18081；访问 `http://服务器公网IP:18081`。引擎保持本机地址。
 
 临时前台运行可用 `./start.sh`（不要与服务同时启动）；`Ctrl+C` 停止。
 
@@ -38,4 +40,4 @@ sudo systemctl start justcpc-online-judge
 
 ## 从源码构建
 
-构建机安装 Go 1.26.5+、Node.js 22.12+、npm，在仓库根目录执行 `./script/build-release.sh`。产物在 `release/`；指定版本用 `VERSION=0.2.1 ./script/build-release.sh`。
+构建机安装 Go 1.26.5+、Node.js 22.12+、npm，在仓库根目录执行 `./script/build-release.sh`。产物在 `release/`；指定版本用 `VERSION=0.2.2 ./script/build-release.sh`。

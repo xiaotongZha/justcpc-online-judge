@@ -142,7 +142,7 @@ func (s Service) ListPublic(ctx context.Context, actorID int64) ([]Summary, erro
 		return nil, err
 	}
 	defer rows.Close()
-	var result []Summary
+	result := make([]Summary, 0)
 	for rows.Next() {
 		var item Summary
 		var score int64

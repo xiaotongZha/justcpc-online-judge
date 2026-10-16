@@ -63,7 +63,11 @@ function newProblem() {
       </div>
 
       <div class="oj-table-wrap">
-        <el-table :data="filtered" v-loading="store.loading" empty-text="没有匹配的题目">
+        <el-table
+          :data="filtered"
+          v-loading="store.loading"
+          :empty-text="store.problems.length === 0 ? '题目库还没有题目，点击右上角“新建题目”开始创建' : '没有匹配的题目'"
+        >
           <el-table-column label="题目" min-width="280">
             <template #default="{ row }"
               ><button class="oj-title-link" @click="openProblem(row.id)">{{ row.title }}</button

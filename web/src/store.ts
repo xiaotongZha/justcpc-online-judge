@@ -130,12 +130,14 @@ export const store = reactive({
 
 export async function refresh() {
   if (!store.account) return
-  ;[store.problems, store.contests] = await Promise.all([
-    api<ProblemSummary[]>('/problems'),
-    api<Contest[]>('/contests'),
+  const [problems, contests] = await Promise.all([
+    api<ProblemSummary[] | null>('/problems'),
+    api<Contest[] | null>('/contests'),
   ])
+  store.problems = problems ?? []
+  store.contests = contests ?? []
   if (store.account.role === 'admin') {
-    store.accounts = await api<AdminAccount[]>('/accounts')
+    store.accounts = (await api<AdminAccount[] | null>('/accounts')) ?? []
   }
 }
 
