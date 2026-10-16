@@ -1,22 +1,29 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { store, refresh, type AdminAccount } from '../store'
 
 const dialogOpen = ref(false)
+const editingBuiltinAdmin = ref(false)
 const form = reactive({ id: 0, username: '', password: '123456', role: 'user' })
+const fixedAdmin = computed(() => editingBuiltinAdmin.value || form.username === 'admin')
+watch(fixedAdmin, (locked) => {
+  if (locked) form.role = 'admin'
+})
 
 function openCreate() {
+  editingBuiltinAdmin.value = false
   Object.assign(form, { id: 0, username: '', password: '123456', role: 'user' })
   dialogOpen.value = true
 }
 function openEdit(item: AdminAccount) {
+  editingBuiltinAdmin.value = item.username === 'admin'
   Object.assign(form, {
     id: item.id,
     username: item.username,
     password: item.password,
-    role: item.role,
+    role: editingBuiltinAdmin.value ? 'admin' : item.role,
   })
   dialogOpen.value = true
 }
@@ -25,13 +32,13 @@ async function save() {
     if (form.id > 0) {
       await api(`/accounts/${form.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ username: form.username, password: form.password, role: form.role }),
+        body: JSON.stringify({ username: form.username, password: form.password, role: fixedAdmin.value ? 'admin' : form.role }),
       })
       ElMessage.success('账户已保存')
     } else {
       await api('/accounts', {
         method: 'POST',
-        body: JSON.stringify({ username: form.username, password: form.password, role: form.role }),
+        body: JSON.stringify({ username: form.username, password: form.password, role: fixedAdmin.value ? 'admin' : form.role }),
       })
       ElMessage.success('账户已创建')
     }
@@ -111,7 +118,7 @@ async function save() {
     >
       <el-form label-position="top" @submit.prevent="save">
         <el-form-item label="用户名" required
-          ><el-input v-model.trim="form.username" autocomplete="off"
+          ><el-input v-model.trim="form.username" autocomplete="off" :disabled="editingBuiltinAdmin"
         /></el-form-item>
         <el-form-item label="密码" required
           ><el-input
@@ -121,7 +128,7 @@ async function save() {
             autocomplete="new-password"
         /></el-form-item>
         <el-form-item label="身份"
-          ><el-select v-model="form.role" style="width: 100%"
+          ><el-select v-model="form.role" style="width: 100%" :disabled="fixedAdmin"
             ><el-option label="普通用户" value="user" /><el-option
               label="管理员"
               value="admin" /></el-select

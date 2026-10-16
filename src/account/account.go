@@ -24,19 +24,25 @@ type AdminAccount struct {
 
 type Service struct{ Store *store.Store }
 
-func (s Service) EnsureAdmin(ctx context.Context, username, password string) error {
-	var count int
-	if err := s.Store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM accounts WHERE role = 'admin'`).Scan(&count); err != nil {
-		return err
+const DefaultAdminPassword = "12345678"
+
+// EnsureAdmin preserves existing passwords and repairs a previously demoted
+// built-in administrator. The bool reports creation, for first-login guidance.
+func (s Service) EnsureAdmin(ctx context.Context) (bool, error) {
+	var id int64
+	var role string
+	err := s.Store.DB.QueryRowContext(ctx, `SELECT id,role FROM accounts WHERE username='admin'`).Scan(&id, &role)
+	if err == nil {
+		if role != "admin" {
+			_, err = s.Store.DB.ExecContext(ctx, `UPDATE accounts SET role='admin',updated_at=? WHERE id=?`, store.Now(), id)
+		}
+		return false, err
 	}
-	if count > 0 {
-		return nil
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
 	}
-	if username == "" || password == "" {
-		return errors.New("first startup requires JUSTCPC_INITIAL_ADMIN_PASSWORD")
-	}
-	_, err := s.Create(ctx, username, password, "admin")
-	return err
+	_, err = s.Create(ctx, "admin", DefaultAdminPassword, "admin")
+	return err == nil, err
 }
 
 func (s Service) Create(ctx context.Context, username, password, role string) (Account, error) {
@@ -45,6 +51,9 @@ func (s Service) Create(ctx context.Context, username, password, role string) (A
 	}
 	if username == "" || (role != "admin" && role != "user") {
 		return Account{}, errors.New("invalid account")
+	}
+	if username == "admin" && role != "admin" {
+		return Account{}, errors.New("admin 账号只能是管理员")
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -102,12 +111,18 @@ func (s Service) Update(ctx context.Context, id int64, username, password, role 
 	if id <= 0 || username == "" || password == "" || (role != "admin" && role != "user") {
 		return Account{}, errors.New("invalid account")
 	}
-	var oldRole string
-	if err := s.Store.DB.QueryRowContext(ctx, `SELECT role FROM accounts WHERE id=?`, id).Scan(&oldRole); err != nil {
+	var oldUsername, oldRole string
+	if err := s.Store.DB.QueryRowContext(ctx, `SELECT username,role FROM accounts WHERE id=?`, id).Scan(&oldUsername, &oldRole); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Account{}, errors.New("account not found")
 		}
 		return Account{}, err
+	}
+	if oldUsername == "admin" && username != "admin" {
+		return Account{}, errors.New("内置 admin 账号不能改名")
+	}
+	if username == "admin" && role != "admin" {
+		return Account{}, errors.New("admin 账号只能是管理员")
 	}
 	if oldRole == "admin" && role != "admin" {
 		var adminCount int

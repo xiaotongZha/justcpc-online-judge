@@ -23,17 +23,14 @@ import (
 	"justcpc-online-judge/src/web"
 )
 
-// config 汇集启动所需配置。除 session_secret 与 initial_admin_password 外的字段
-// 只从配置文件读取；缺失的配置项使用内置默认值。两个密文字段允许由同名环境变量
-// 补充，配置文件不填写时回退到环境变量。
+// config 汇集启动配置；session_secret 为空时允许由环境变量补充。
 type config struct {
-	Data                 string `json:"data"`
-	Listen               string `json:"listen"`
-	JudgeURL             string `json:"judge_url"`
-	JudgeWorkers         int    `json:"judge_workers"`
-	WebDist              string `json:"web_dist"`
-	SessionSecret        string `json:"session_secret"`
-	InitialAdminPassword string `json:"initial_admin_password"`
+	Data          string `json:"data"`
+	Listen        string `json:"listen"`
+	JudgeURL      string `json:"judge_url"`
+	JudgeWorkers  int    `json:"judge_workers"`
+	WebDist       string `json:"web_dist"`
+	SessionSecret string `json:"session_secret"`
 }
 
 func defaultConfig() config {
@@ -65,9 +62,6 @@ func loadConfig(path string) (config, error) {
 	if cfg.SessionSecret == "" {
 		cfg.SessionSecret = os.Getenv("JUSTCPC_SESSION_SECRET")
 	}
-	if cfg.InitialAdminPassword == "" {
-		cfg.InitialAdminPassword = os.Getenv("JUSTCPC_INITIAL_ADMIN_PASSWORD")
-	}
 	return cfg, nil
 }
 
@@ -75,16 +69,12 @@ func generateConfig(path string) (config, error) {
 	cfg := defaultConfig()
 	cfg.Listen = "0.0.0.0:18081"
 	cfg.SessionSecret = os.Getenv("JUSTCPC_SESSION_SECRET")
-	cfg.InitialAdminPassword = os.Getenv("JUSTCPC_INITIAL_ADMIN_PASSWORD")
-	var random [50]byte
+	var random [32]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		return cfg, err
 	}
 	if cfg.SessionSecret == "" {
 		cfg.SessionSecret = base64.RawURLEncoding.EncodeToString(random[:32])
-	}
-	if cfg.InitialAdminPassword == "" {
-		cfg.InitialAdminPassword = base64.RawURLEncoding.EncodeToString(random[32:])
 	}
 	if len(cfg.SessionSecret) < 32 {
 		return cfg, errors.New("JUSTCPC_SESSION_SECRET must contain at least 32 bytes")
@@ -105,7 +95,7 @@ func generateConfig(path string) (config, error) {
 	if err := errors.Join(writeErr, closeErr); err != nil {
 		return cfg, err
 	}
-	log.Printf("已生成配置 %s；初始管理员：admin / %s（首次登录后请修改密码）", path, cfg.InitialAdminPassword)
+	log.Printf("已生成配置 %s", path)
 	return cfg, nil
 }
 
@@ -130,8 +120,12 @@ func main() {
 		log.Fatal(err)
 	}
 	accounts := account.Service{Store: storage}
-	if err := accounts.EnsureAdmin(context.Background(), "admin", cfg.InitialAdminPassword); err != nil {
+	createdAdmin, err := accounts.EnsureAdmin(context.Background())
+	if err != nil {
 		log.Fatal(err)
+	}
+	if createdAdmin {
+		log.Printf("初始管理员：admin / %s（首次登录后请修改密码）", account.DefaultAdminPassword)
 	}
 	sessions, err := account.NewSessionManager(cfg.SessionSecret)
 	if err != nil {

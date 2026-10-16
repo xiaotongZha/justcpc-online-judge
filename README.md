@@ -27,7 +27,7 @@ cd web && npm install && npm run build && cd ..
 go run ./src
 ```
 
-首次启动自动生成 `config.json` 和随机管理员密码，密码显示在终端；已有配置不会覆盖。自备配置参考 `config.example.json`。
+首次启动自动生成 `config.json`，创建管理员 `admin`，默认密码 `12345678`；登录后在账户管理修改密码。已有配置和密码不会覆盖。`admin` 的账号名和管理员身份固定。自备配置参考 `config.example.json`。
 
 ## 配置（config.json）
 
@@ -39,9 +39,8 @@ go run ./src
 | `judge_workers` | OJ 同时派发评测的 worker 数；默认 `0` 自动读取引擎容量，正整数手动设置，负数报错 |
 | `web_dist` | 前端构建产物目录，默认 `./web/dist` |
 | `session_secret` | 会话签名密钥，**≥32 字节** |
-| `initial_admin_password` | 首次启动创建管理员 `admin` 的初始密码 |
 
-配置文件路径可用环境变量 `JUSTCPC_CONFIG` 指定；`session_secret`、`initial_admin_password` 可用 `JUSTCPC_SESSION_SECRET`、`JUSTCPC_INITIAL_ADMIN_PASSWORD` 补充。
+配置文件路径可用环境变量 `JUSTCPC_CONFIG` 指定；`session_secret` 可用 `JUSTCPC_SESSION_SECRET` 补充。旧配置中的 `initial_admin_password` 已不再生效，可删除。
 
 `judge_workers` 与引擎的 `workers` 分别控制派发并发和实际执行并发。两边省略或设为 `0` 时，引擎根据 CPU 亲和性、cgroup CPU 配额及可用内存保守选择固定容量，OJ 在启动时通过 `GET /api/capacity` 读取这个值，用户无需分别选择两份并发数。
 

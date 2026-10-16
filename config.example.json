@@ -4,6 +4,5 @@
   "judge_url": "http://127.0.0.1:18080",
   "judge_workers": 0,
   "web_dist": "./web/dist",
-  "session_secret": "",
-  "initial_admin_password": ""
+  "session_secret": ""
 }

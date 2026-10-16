@@ -20,7 +20,7 @@ sudo ./install-service.sh
 sudo journalctl -u justcpc-online-judge -g '初始管理员' --no-pager
 ```
 
-首次自动生成 `config.json`，日志显示 `admin` 初始密码。服务后台运行、开机自启。
+首次自动生成 `config.json`，默认登录 `admin / 12345678`，登录后在账户管理改密码。升级保留已有密码。服务后台运行、开机自启。
 
 公网访问：将 `config.json` 的 `listen` 改为 `0.0.0.0:18081`，重启 OJ，并在云防火墙及已启用的系统防火墙放行 TCP 18081；访问 `http://服务器公网IP:18081`。引擎保持本机地址。
 
