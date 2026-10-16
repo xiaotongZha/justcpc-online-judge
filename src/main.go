@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log"
@@ -44,15 +46,13 @@ func defaultConfig() config {
 	}
 }
 
-// loadConfig 从 path 读取 JSON 配置。文件不存在时使用内置默认值；字段缺省时保持
-// 默认值。密文配置为空时回退到 JUSTCPC_SESSION_SECRET 和
-// JUSTCPC_INITIAL_ADMIN_PASSWORD 环境变量。
+// loadConfig 首次运行生成配置；已有配置中的空密文允许由环境变量补充。
 func loadConfig(path string) (config, error) {
 	cfg := defaultConfig()
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return cfg, nil
+			return generateConfig(path)
 		}
 		return cfg, err
 	}
@@ -68,6 +68,44 @@ func loadConfig(path string) (config, error) {
 	if cfg.InitialAdminPassword == "" {
 		cfg.InitialAdminPassword = os.Getenv("JUSTCPC_INITIAL_ADMIN_PASSWORD")
 	}
+	return cfg, nil
+}
+
+func generateConfig(path string) (config, error) {
+	cfg := defaultConfig()
+	cfg.Listen = "0.0.0.0:18081"
+	cfg.SessionSecret = os.Getenv("JUSTCPC_SESSION_SECRET")
+	cfg.InitialAdminPassword = os.Getenv("JUSTCPC_INITIAL_ADMIN_PASSWORD")
+	var random [50]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return cfg, err
+	}
+	if cfg.SessionSecret == "" {
+		cfg.SessionSecret = base64.RawURLEncoding.EncodeToString(random[:32])
+	}
+	if cfg.InitialAdminPassword == "" {
+		cfg.InitialAdminPassword = base64.RawURLEncoding.EncodeToString(random[32:])
+	}
+	if len(cfg.SessionSecret) < 32 {
+		return cfg, errors.New("JUSTCPC_SESSION_SECRET must contain at least 32 bytes")
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return cfg, err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if errors.Is(err, os.ErrExist) {
+		return loadConfig(path)
+	}
+	if err != nil {
+		return cfg, err
+	}
+	_, writeErr := file.Write(append(data, '\n'))
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		return cfg, err
+	}
+	log.Printf("已生成配置 %s；初始管理员：admin / %s（首次登录后请修改密码）", path, cfg.InitialAdminPassword)
 	return cfg, nil
 }
 
