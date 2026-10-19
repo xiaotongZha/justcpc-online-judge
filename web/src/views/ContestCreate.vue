@@ -5,6 +5,7 @@ import { Top, Bottom, Delete } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { store, navigate, refresh } from '../store'
 import type { Contest, ProblemSummary } from '../store'
+import PdfPreview from '../components/PdfPreview.vue'
 
 const form = reactive({ name: '', description: '' })
 const statementFile = ref<File | null>(null)
@@ -12,7 +13,7 @@ const rosterFile = ref<File | null>(null)
 const chosen = ref<{ problem_id: number; title: string; score: string }[]>([])
 const keyword = ref('')
 const saving = ref(false)
-type RosterEntry = { student_id: string; name: string; default_password: boolean }
+type RosterEntry = { student_id: string; name: string }
 type RosterPreview = { total: number; entries: RosterEntry[] }
 const rosterPreview = ref<RosterPreview | null>(null)
 const rosterLoading = ref(false)
@@ -59,7 +60,9 @@ const rowClass = ({ row }: { row: ProblemSummary }) =>
   row.accepting_submissions ? 'clickable-row' : ''
 
 function onStatement(file: any) {
-  if (file?.raw) statementFile.value = file.raw
+  if (!file?.raw) return
+  if (!/\.pdf$/i.test(file.raw.name)) return ElMessage.warning('请选择 PDF 文件')
+  statementFile.value = file.raw
 }
 function clearRoster() {
   rosterRequest++
@@ -148,10 +151,10 @@ async function submit() {
   data.append('statement', statementFile.value)
   data.append('roster', rosterFile.value)
   try {
-    await api<Contest>('/contests', { method: 'POST', body: data })
+    const contest = await api<Contest>('/contests', { method: 'POST', body: data })
     ElMessage.success('比赛已创建')
-    await refresh()
-    navigate('contests')
+    navigate('contest-detail', contest.id)
+    await refresh().catch(() => ElMessage.warning('比赛已创建，列表更新失败，请稍后刷新'))
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : String(e))
   } finally {
@@ -193,14 +196,19 @@ onMounted(refresh)
       </div>
     </div>
 
-    <div class="oj-card">
+    <section class="oj-card" aria-labelledby="statement-card-title">
       <div class="oj-card-header">
         <span class="step">2</span>
-        <h3>比赛题面与选手名单</h3>
+        <h3 id="statement-card-title">题面 PDF</h3>
+        <el-tag size="small" type="info">必填</el-tag>
       </div>
-      <div class="oj-card-body grid-2">
-        <div>
-          <div class="field-label">比赛题面 PDF <em>*</em></div>
+      <div class="oj-card-body upload-preview-layout">
+        <div class="upload-column">
+          <h4>上传正式题面</h4>
+          <p class="upload-description">
+            考试系统不支持逐题题面预览。请上传一份完整、正式的试题
+            PDF，供考生下载阅读，并方便赛后留档。
+          </p>
           <el-upload
             drag
             :auto-upload="false"
@@ -209,103 +217,142 @@ onMounted(refresh)
             accept=".pdf"
             :on-change="onStatement"
             class="uploader"
+            aria-label="上传题面 PDF"
           >
             <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
             <div class="el-upload__text">拖拽 PDF 到此处，或<em>点击选择</em></div>
           </el-upload>
-          <div v-if="statementFile" class="file-state">
-            <el-icon><CircleCheckFilled /></el-icon>{{ statementFile.name }}
+          <div v-if="statementFile" class="selected-file">
+            <el-icon><Document /></el-icon
+            ><span
+              >{{ statementFile.name
+              }}<small>{{ (statementFile.size / 1024 / 1024).toFixed(2) }} MB</small></span
+            >
+            <el-button text size="small" :disabled="saving" @click="statementFile = null"
+              >移除</el-button
+            >
           </div>
+          <p class="upload-footnote">右侧预览仅供试题组核对题号、页码与排版。</p>
         </div>
-        <div>
-          <div class="field-label">选手名单 <em>*</em></div>
+        <PdfPreview :file="statementFile" />
+      </div>
+    </section>
+
+    <section class="oj-card" aria-labelledby="roster-card-title">
+      <div class="oj-card-header">
+        <span class="step">3</span>
+        <h3 id="roster-card-title">选手名单</h3>
+        <el-tag size="small" type="info">必填</el-tag>
+      </div>
+      <div class="oj-card-body upload-preview-layout">
+        <div class="upload-column">
+          <h4>上传名单</h4>
+          <p class="upload-description">
+            支持
+            <strong>CSV 或 XLSX</strong
+            >。<strong>必须严格遵守格式模板</strong>，请下载模板填写后再上传。
+          </p>
+          <div class="templates">
+            <a href="/api/contest-roster-example.csv" download="roster-example.csv"
+              ><el-icon><Download /></el-icon>CSV 格式模板</a
+            ><a href="/api/contest-roster-example.xlsx" download="roster-example.xlsx"
+              ><el-icon><Download /></el-icon>XLSX 格式模板</a
+            >
+          </div>
           <el-upload
             drag
             :auto-upload="false"
             :disabled="saving"
             :show-file-list="false"
-            accept=".xlsx,.csv,.txt"
+            accept=".xlsx,.csv"
             :on-change="onRoster"
             class="uploader"
+            aria-label="上传选手名单"
           >
             <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-            <div class="el-upload__text">拖拽名单到此处，或<em>点击选择</em></div>
+            <div class="el-upload__text">拖拽 CSV / XLSX 到此处，或<em>点击选择</em></div>
           </el-upload>
-          <div v-if="rosterFile" class="file-state">
-            <el-icon v-if="rosterPreview"><CircleCheckFilled /></el-icon>{{ rosterFile.name }}
-            <el-button text size="small" :disabled="saving" @click="clearRoster">清除</el-button>
+          <div v-if="rosterFile" class="selected-file">
+            <el-icon><Document /></el-icon><span>{{ rosterFile.name }}</span
+            ><el-button text size="small" :disabled="saving" @click="clearRoster">移除</el-button>
           </div>
-          <div class="templates">
-            <span class="muted small">示例模板（含表头与两行示例数据）：</span>
-            <a href="/api/contest-roster-example.csv" download="roster-example.csv"
-              ><el-icon><Download /></el-icon>CSV</a
-            >
-            <a href="/api/contest-roster-example.xlsx" download="roster-example.xlsx"
-              ><el-icon><Download /></el-icon>XLSX</a
-            >
-          </div>
-          <p class="small muted" style="margin: 10px 0 0">
-            支持 XLSX / CSV，包含学号、姓名，可选密码。请参照模板填写。
+          <p class="upload-footnote">
+            表头为
+            student_id、name、password，三列均必填，每位选手都要设置密码。学号和密码使用文本格式，保留前导零。
           </p>
+          <pre class="roster-example">
+student_id,name,password
+20260001,张三,pw0001
+20260002,李四,pw0002</pre
+          >
         </div>
-      </div>
-      <section v-if="rosterFile" class="roster-preview" aria-label="选手名单预览">
-        <p v-if="rosterLoading" class="muted" role="status">正在解析并校验选手名单…</p>
-        <el-alert
-          v-else-if="rosterError"
-          :title="rosterError"
-          type="error"
-          :closable="false"
-          show-icon
-        />
-        <template v-else-if="rosterPreview">
-          <div class="roster-preview-header">
-            <div>
-              <h3>
-                选手名单预览
-                <el-tag size="small" type="success">共 {{ rosterPreview.total }} 人</el-tag>
-              </h3>
-              <p class="small muted">
-                请核对学号与姓名。未填写密码时，考试账号初始密码与学号相同。
-              </p>
-            </div>
-            <el-input
-              v-model="rosterQuery"
-              placeholder="查找学号或姓名"
-              aria-label="查找预览选手"
-              clearable
-              class="roster-search"
-            />
+        <section class="roster-preview" aria-label="选手名单预览">
+          <div v-if="!rosterFile" class="roster-empty">
+            <el-icon><UserFilled /></el-icon>
+            <h3>上传后在这里核对名单</h3>
+            <p>上传后显示学号、姓名和人数，便于核对。</p>
           </div>
-          <el-table :data="rosterRows" size="small" stripe empty-text="没有匹配的选手">
-            <el-table-column label="序号" width="65">
-              <template #default="{ $index }">{{
-                (rosterPage - 1) * rosterPageSize + $index + 1
-              }}</template>
-            </el-table-column>
-            <el-table-column prop="student_id" label="学号" min-width="150" />
-            <el-table-column prop="name" label="姓名" min-width="120" />
-            <el-table-column label="初始密码" min-width="170">
-              <template #default="{ row }">{{
-                row.default_password ? '默认（与学号相同）' : '已填写'
-              }}</template>
-            </el-table-column>
-          </el-table>
-          <el-pagination
-            v-model:current-page="rosterPage"
-            :page-size="rosterPageSize"
-            :total="filteredRoster.length"
-            layout="total, prev, pager, next"
-            small
-            class="roster-pagination"
+          <p v-else-if="rosterLoading" class="muted" role="status">正在解析并校验选手名单…</p>
+          <el-alert
+            v-else-if="rosterError"
+            :title="rosterError"
+            type="error"
+            :closable="false"
+            show-icon
           />
-        </template>
-      </section>
-    </div>
+          <template v-else-if="rosterPreview">
+            <div class="roster-preview-header">
+              <div>
+                <h3>
+                  选手名单预览
+                  <el-tag size="small" type="success">共 {{ rosterPreview.total }} 人</el-tag>
+                </h3>
+                <p class="small muted">
+                  请核对学号、姓名与人数。所有选手均已填写密码，预览中不展示密码。
+                </p>
+              </div>
+              <el-input
+                v-model="rosterQuery"
+                placeholder="查找学号或姓名"
+                aria-label="查找预览选手"
+                clearable
+                class="roster-search"
+              />
+            </div>
+            <el-table
+              :data="rosterRows"
+              size="small"
+              stripe
+              max-height="320"
+              empty-text="没有匹配的选手"
+            >
+              <el-table-column label="序号" width="65">
+                <template #default="{ $index }">{{
+                  (rosterPage - 1) * rosterPageSize + $index + 1
+                }}</template>
+              </el-table-column>
+              <el-table-column prop="student_id" label="学号" min-width="150" />
+              <el-table-column prop="name" label="姓名" min-width="120" />
+              <el-table-column label="初始密码" width="100">
+                <template #default>已填写</template>
+              </el-table-column>
+            </el-table>
+            <el-pagination
+              v-model:current-page="rosterPage"
+              :page-size="rosterPageSize"
+              :total="filteredRoster.length"
+              layout="total, prev, pager, next"
+              small
+              class="roster-pagination"
+            />
+          </template>
+        </section>
+      </div>
+    </section>
 
     <div class="oj-card">
       <div class="oj-card-header">
-        <span class="step">3</span>
+        <span class="step">4</span>
         <h3>组卷：选择题目并设置分值</h3>
         <span class="spacer" />
         <el-tag type="info" size="small" effect="light"
@@ -419,7 +466,7 @@ onMounted(refresh)
       <el-button
         type="primary"
         :loading="saving"
-        :disabled="rosterLoading || !rosterPreview"
+        :disabled="rosterLoading || !rosterPreview || !!rosterError"
         @click="submit"
         >创建比赛</el-button
       >
@@ -428,9 +475,106 @@ onMounted(refresh)
 </template>
 
 <style scoped>
+.grid-2,
+.upload-preview-layout,
+.picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.upload-preview-layout {
+  align-items: start;
+}
+.upload-column {
+  min-width: 0;
+}
+.upload-column h4 {
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+.upload-description {
+  color: var(--oj-text-secondary);
+  font-size: 13px;
+  line-height: 1.9;
+  margin: 0 0 18px;
+}
+.upload-description strong {
+  color: var(--oj-text);
+  font-weight: 600;
+}
+.upload-footnote {
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--oj-text-secondary);
+  margin: 14px 0 0;
+  overflow-wrap: anywhere;
+}
+.selected-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--oj-border);
+  border-radius: 7px;
+  padding: 10px 12px;
+  margin-top: 12px;
+  font-size: 12px;
+}
+.selected-file > .el-icon {
+  color: var(--oj-primary);
+  font-size: 20px;
+  flex: none;
+}
+.selected-file > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.selected-file small {
+  display: block;
+  color: var(--oj-text-secondary);
+  margin-top: 3px;
+}
+.roster-empty {
+  min-height: 340px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+  color: var(--oj-text-secondary);
+  padding: 30px;
+}
+.roster-empty > .el-icon {
+  font-size: 36px;
+  color: #8a98af;
+}
+.roster-empty h3 {
+  font-size: 14px;
+  color: var(--oj-text);
+  font-weight: 500;
+  margin: 0;
+}
+.roster-empty p {
+  font-size: 12px;
+  line-height: 1.8;
+  margin: 0;
+}
+.roster-example {
+  padding: 12px;
+  background: var(--oj-bg);
+  border: 1px solid var(--oj-border);
+  border-radius: 6px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
 .roster-preview {
   padding: 18px 22px 22px;
-  border-top: 1px solid var(--oj-border);
+  border: 1px solid var(--oj-border);
+  border-radius: 10px;
+  min-width: 0;
 }
 .roster-preview-header {
   display: flex;
@@ -464,22 +608,8 @@ onMounted(refresh)
   font-size: 12px;
   font-weight: 700;
 }
-.grid-2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px;
-}
 .grid-2 :deep(.el-form-item) {
   margin-bottom: 8px;
-}
-.field-label {
-  font-size: 13px;
-  color: var(--oj-text-secondary);
-  margin-bottom: 6px;
-}
-.field-label em {
-  color: var(--el-color-danger);
-  font-style: normal;
 }
 .uploader {
   width: 100%;
@@ -487,17 +617,8 @@ onMounted(refresh)
 .uploader :deep(.el-upload-dragger) {
   padding: 18px 10px;
 }
-.file-state {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  color: var(--el-color-success);
-  font-size: 13px;
-  word-break: break-all;
-}
 .templates {
-  margin-top: 10px;
+  margin: 0 0 18px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -506,12 +627,16 @@ onMounted(refresh)
 .templates a {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--oj-border);
+  border-radius: 6px;
+  color: var(--oj-primary);
+  font-size: 12px;
+  text-decoration: none;
 }
-.picker {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px;
+.picker-panel {
+  min-width: 0;
 }
 .panel-title {
   display: flex;
@@ -574,6 +699,7 @@ onMounted(refresh)
   cursor: pointer;
 }
 @media (max-width: 1100px) {
+  .upload-preview-layout,
   .grid-2,
   .picker {
     grid-template-columns: 1fr;

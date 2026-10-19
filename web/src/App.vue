@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from './api'
-import { store, knownTabs, refresh, navigate, restoreHistory, resetSession } from './store'
+import { store, loadRoute, refresh, navigate, restoreHistory, resetSession } from './store'
 import Users from './views/Users.vue'
 import Problems from './views/Problems.vue'
 import ProblemView from './views/ProblemView.vue'
@@ -65,9 +65,10 @@ async function login() {
       method: 'POST',
       body: JSON.stringify(loginForm.value),
     })
+    const requested = location.hash
     resetSession()
     store.account = account
-    history.replaceState({ justcpc: true, tab: 'problems' }, '', '#problems')
+    await loadRoute(requested)
     loginForm.value.password = ''
     await refresh()
   } catch (e) {
@@ -88,15 +89,13 @@ async function logout() {
 }
 
 onMounted(async () => {
-  const hash = location.hash.slice(1)
-  if (knownTabs.has(hash)) store.tab = hash
-  history.replaceState({ justcpc: true, tab: store.tab }, '', `#${store.tab}`)
-  window.addEventListener('popstate', (event: PopStateEvent) => {
-    const next = event.state?.justcpc && typeof event.state.tab === 'string' ? event.state.tab : ''
-    restoreHistory(next)
+  window.addEventListener('popstate', restoreHistory)
+  window.addEventListener('hashchange', () => {
+    if (location.hash !== store.routeKey) void loadRoute()
   })
   try {
     store.account = await api<{ id: number; username: string; role: 'admin' | 'user' }>('/me')
+    await loadRoute()
     await refresh()
   } catch {
     /* not logged in */
@@ -208,16 +207,27 @@ onMounted(async () => {
         <span class="oj-header-caption">JustCPC Online Judge</span>
       </header>
       <main class="oj-page">
-        <Users v-if="store.tab === 'users'" />
-        <Problems v-else-if="store.tab === 'problems'" />
-        <ProblemView v-else-if="store.tab === 'problem-view'" />
-        <ProblemEdit v-else-if="store.tab === 'problem-edit'" />
-        <Submissions v-else-if="store.tab === 'submissions'" />
-        <SubmissionDetail v-else-if="store.tab === 'submission-detail'" />
-        <Contests v-else-if="store.tab === 'contests'" />
-        <ContestCreate v-else-if="store.tab === 'contest-create'" />
-        <ContestDetail v-else-if="store.tab === 'contest-detail'" />
-        <Admin v-else-if="store.tab === 'admin'" />
+        <div v-if="store.routeLoading" class="oj-card oj-card-body" role="status">
+          正在加载页面…
+        </div>
+        <div v-else-if="store.routeError" class="oj-card oj-card-body" role="alert">
+          <h2>页面暂时无法打开</h2>
+          <p>{{ store.routeError }}</p>
+          <el-button @click="loadRoute()">重试</el-button>
+          <el-button @click="navigate(activeNav?.key ?? 'problems')">返回列表</el-button>
+        </div>
+        <template v-else :key="store.routeKey">
+          <Users v-if="store.tab === 'users'" />
+          <Problems v-else-if="store.tab === 'problems'" />
+          <ProblemView v-else-if="store.tab === 'problem-view'" />
+          <ProblemEdit v-else-if="store.tab === 'problem-edit'" />
+          <Submissions v-else-if="store.tab === 'submissions'" />
+          <SubmissionDetail v-else-if="store.tab === 'submission-detail'" />
+          <Contests v-else-if="store.tab === 'contests'" />
+          <ContestCreate v-else-if="store.tab === 'contest-create'" />
+          <ContestDetail v-else-if="store.tab === 'contest-detail'" />
+          <Admin v-else-if="store.tab === 'admin'" />
+        </template>
       </main>
     </div>
   </div>

@@ -2,7 +2,8 @@
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
-import { store, goBack, navigate, refresh, type PublicProblem, type Submission } from '../store'
+import { downloadTestdataFile } from '../testdataDownload'
+import { store, goBack, navigate, refresh, type Submission } from '../store'
 import StatusTag from '../components/StatusTag.vue'
 import LanguageTag from '../components/LanguageTag.vue'
 
@@ -13,20 +14,17 @@ const passed = computed(
 const total = computed(() => (sub.value?.judge_result_json?.cases ?? []).length)
 const hasCompileLog = computed(() => Boolean(sub.value?.judge_result_json?.compile_log))
 
-function verdictClass(verdict: string) {
-  return verdict === 'AC' ? 'oj-log-ok' : 'oj-log-bad'
+function downloadCase(caseID: string, kind: 'input' | 'output') {
+  if (!sub.value?.can_download_testdata || !store.account) return
+  if (!downloadTestdataFile(store.account.id, sub.value.problem_id, caseID, kind)) {
+    ElMessage.warning('请勿触发重复下载，请五秒后再试')
+  }
 }
 
 async function openProblem() {
   const id = sub.value?.problem_id
   if (!id) return
-  try {
-    store.selectedProblem = await api<PublicProblem>(`/problems/${id}`)
-    store.editTargetID = id
-    navigate('problem-view')
-  } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : String(e))
-  }
+  navigate('problem-view', id)
 }
 
 let timer: ReturnType<typeof setInterval> | undefined
@@ -34,8 +32,10 @@ async function poll() {
   const current = store.selectedSubmission
   if (!current || current.status !== 'waiting') return
   try {
-    store.selectedSubmission = await api<Submission>(`/submissions/${current.id}`)
-    if (store.selectedSubmission.status !== 'waiting') {
+    const item = await api<Submission>(`/submissions/${current.id}`)
+    if (store.tab !== 'submission-detail' || store.routeID !== current.id) return
+    store.selectedSubmission = item
+    if (item.status !== 'waiting') {
       await refresh()
     }
   } catch {
@@ -124,27 +124,34 @@ onBeforeUnmount(() => clearInterval(timer))
       </div>
       <div v-else class="oj-table-wrap">
         <el-table :data="sub.judge_result_json?.cases ?? []">
-          <el-table-column prop="id" label="测试点" width="100" />
-          <el-table-column label="结果" width="110"
+          <el-table-column prop="id" label="测试点" min-width="100" />
+          <el-table-column label="结果" min-width="110"
             ><template #default="{ row }"><StatusTag :status="row.verdict" /></template
           ></el-table-column>
-          <el-table-column label="CPU 时间" width="130"
+          <el-table-column label="CPU 时间" min-width="130"
             ><template #default="{ row }"
               ><span class="mono">{{ row.time_ms }} ms</span></template
             ></el-table-column
           >
-          <el-table-column label="内存" width="140"
+          <el-table-column label="内存" min-width="140"
             ><template #default="{ row }"
               ><span class="mono">{{ (row.memory / 1024).toFixed(0) }} KB</span></template
             ></el-table-column
           >
-          <el-table-column label="诊断信息" min-width="240"
-            ><template #default="{ row }"
-              ><span v-if="row.error" :class="verdictClass(row.verdict)">{{ row.error }}</span
-              ><span v-else-if="row.stderr" class="muted small">{{ row.stderr }}</span
-              ><span v-else class="muted">—</span></template
-            ></el-table-column
-          >
+          <el-table-column v-if="sub.can_download_testdata" label="下载输入" min-width="140">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="downloadCase(row.id, 'input')">
+                <el-icon><Download /></el-icon>下载输入
+              </el-button>
+            </template>
+          </el-table-column>
+          <el-table-column v-if="sub.can_download_testdata" label="下载输出" min-width="140">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="downloadCase(row.id, 'output')">
+                <el-icon><Download /></el-icon>下载输出
+              </el-button>
+            </template>
+          </el-table-column>
         </el-table>
       </div>
     </div>

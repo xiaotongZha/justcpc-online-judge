@@ -50,6 +50,7 @@ export type Submission = {
   submitted_at: string
   judged_at?: string
   source?: string
+  can_download_testdata: boolean
   judge_result_json?: { compile_log?: string; cases?: CaseResult[] }
 }
 export type Contest = {
@@ -116,7 +117,13 @@ export const store = reactive({
   account: null as Account | null,
   tab: 'problems',
   loading: false,
+  routeID: 0,
+  routeKey: '',
+  routeLoading: false,
+  routeError: '',
   problems: [] as ProblemSummary[],
+  problemList: { keyword: '', page: 1, pageSize: 20 },
+  contestList: { page: 1, pageSize: 20 },
   submissions: [] as Submission[],
   contests: [] as Contest[],
   accounts: [] as AdminAccount[],
@@ -125,7 +132,6 @@ export const store = reactive({
   editTargetID: 0 as number,
   selectedSubmission: null as Submission | null,
   selectedContest: null as Contest | null,
-  navigation: [] as string[],
 })
 
 export async function refresh() {
@@ -142,10 +148,15 @@ export async function refresh() {
 }
 
 export function resetSession() {
+  routeRequest++
+  store.routeLoading = false
+  store.routeError = ''
+  store.routeID = 0
   store.account = null
-  store.navigation = []
   store.tab = 'problems'
   store.problems = []
+  Object.assign(store.problemList, { keyword: '', page: 1, pageSize: 20 })
+  Object.assign(store.contestList, { page: 1, pageSize: 20 })
   store.submissions = []
   store.contests = []
   store.accounts = []
@@ -156,32 +167,110 @@ export function resetSession() {
   store.editTargetID = 0
 }
 
-export function navigate(next: string) {
-  if (store.tab === next) return
+type Route = { tab: string; id: number }
+const detailTabs = new Set(['problem-view', 'problem-edit', 'submission-detail', 'contest-detail'])
+
+export function routeHash(tab: string, id = 0): string {
+  if (tab === 'problem-edit') return id ? `#/problems/${id}/edit` : '#/problems/new'
+  if (tab === 'problem-view') return `#/problems/${id}`
+  if (tab === 'submission-detail') return `#/submissions/${id}`
+  if (tab === 'contest-detail') return `#/contests/${id}`
+  return `#/${tab}`
+}
+
+export function parseRoute(hash: string): Route {
+  const path = hash.replace(/^#\/?/, '')
+  if (path === 'problems/new') return { tab: 'problem-edit', id: 0 }
+  const match = /^(problems|submissions|contests)\/([1-9]\d*)(\/edit)?$/.exec(path)
+  if (match && Number.isSafeInteger(Number(match[2]))) {
+    const tab =
+      match[1] === 'problems'
+        ? match[3]
+          ? 'problem-edit'
+          : 'problem-view'
+        : match[1] === 'submissions'
+          ? 'submission-detail'
+          : 'contest-detail'
+    if (!match[3] || match[1] === 'problems') return { tab, id: Number(match[2]) }
+  }
+  if (knownTabs.has(path) && !detailTabs.has(path)) return { tab: path, id: 0 }
+  // 旧版详情链接没有 ID，返回所属列表，避免出现空白页。
+  if (path.startsWith('submission')) return { tab: 'submissions', id: 0 }
+  if (path.startsWith('contest')) return { tab: 'contests', id: 0 }
+  return { tab: 'problems', id: 0 }
+}
+
+let routeRequest = 0
+export async function loadRoute(hash = location.hash) {
+  const request = ++routeRequest
+  const route = parseRoute(hash)
+  store.routeLoading = true
+  store.routeError = ''
+  store.tab = route.tab
+  store.routeID = route.id
+  store.routeKey = routeHash(route.tab, route.id)
+  if (location.hash !== store.routeKey) history.replaceState(history.state, '', store.routeKey)
+  store.editTargetID = route.tab.startsWith('problem') ? route.id : 0
+  store.selectedProblem = null
+  store.selectedEditor = null
+  store.selectedSubmission = null
+  store.selectedContest = null
+  try {
+    if (route.id) {
+      const path = route.tab.startsWith('problem')
+        ? `/problems/${route.id}${route.tab === 'problem-edit' ? '/editor' : ''}`
+        : route.tab === 'submission-detail'
+          ? `/submissions/${route.id}`
+          : `/contests/${route.id}`
+      const item = await api<PublicProblem | EditorProblem | Submission | ContestDetail>(path)
+      if (request !== routeRequest) return
+      if (route.tab === 'problem-view') store.selectedProblem = item as PublicProblem
+      if (route.tab === 'problem-edit') store.selectedEditor = item as EditorProblem
+      if (route.tab === 'submission-detail') store.selectedSubmission = item as Submission
+      if (route.tab === 'contest-detail') store.selectedContest = item as ContestDetail
+    }
+  } catch (error) {
+    if (request === routeRequest)
+      store.routeError = error instanceof Error ? error.message : String(error)
+  } finally {
+    if (request === routeRequest) store.routeLoading = false
+  }
+}
+
+export function navigate(next: string, id?: number) {
+  const targetID =
+    id ??
+    (next === 'problem-view'
+      ? store.selectedProblem?.id
+      : next === 'problem-edit'
+        ? store.editTargetID
+        : next === 'submission-detail'
+          ? store.selectedSubmission?.id
+          : next === 'contest-detail'
+            ? store.selectedContest?.id
+            : 0) ??
+    0
+  const hash = routeHash(next, targetID)
+  if (location.hash === hash) return
   history.replaceState({ ...history.state, scrollY: window.scrollY }, '')
-  store.navigation.push(store.tab)
-  store.tab = next
-  history.pushState({ justcpc: true, tab: next }, '', `#${next}`)
+  const depth = history.state?.justcpc ? Number(history.state.depth) || 0 : 0
+  history.pushState({ justcpc: true, depth: depth + 1 }, '', hash)
+  void loadRoute(hash)
   window.scrollTo({ top: 0, behavior: 'instant' })
 }
 
 export function goBack(fallback = 'problems') {
-  if (store.navigation.length > 0) {
+  if (history.state?.justcpc && history.state.depth > 0) {
     history.back()
     return
   }
-  if (store.tab !== fallback) navigate(fallback)
+  navigate(fallback)
 }
 
-export function restoreHistory(next: string) {
-  if (!knownTabs.has(next)) return
-  if (store.navigation.at(-1) === next) {
-    store.navigation.pop()
-  } else {
-    store.navigation.push(store.tab)
-  }
-  store.tab = next
-  requestAnimationFrame(() =>
-    window.scrollTo({ top: history.state?.scrollY ?? 0, behavior: 'instant' }),
+export function restoreHistory() {
+  void loadRoute().then(() =>
+    requestAnimationFrame(() =>
+      window.scrollTo({ top: history.state?.scrollY ?? 0, behavior: 'instant' }),
+    ),
   )
 }

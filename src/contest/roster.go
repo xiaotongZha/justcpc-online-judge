@@ -21,7 +21,7 @@ type rosterEntry struct {
 
 // ParseRoster 解析管理员上传的名单，支持 XLSX 与 CSV，CSV 做编码检测
 // （UTF-8 / UTF-8 BOM / GBK），无法识别时返回明确错误。
-// 表头固定为 student_id,name[,password]。
+// 表头固定为 student_id,name,password。
 func ParseRoster(filename string, data []byte) ([]rosterEntry, error) {
 	if len(data) == 0 {
 		return nil, errors.New("名单文件为空")
@@ -38,7 +38,9 @@ func ParseRoster(filename string, data []byte) ([]rosterEntry, error) {
 		if err != nil {
 			return nil, err
 		}
-		parsed, err := csv.NewReader(strings.NewReader(text)).ReadAll()
+		reader := csv.NewReader(strings.NewReader(text))
+		reader.FieldsPerRecord = -1
+		parsed, err := reader.ReadAll()
 		if err != nil {
 			return nil, fmt.Errorf("名单格式错误：%w", err)
 		}
@@ -90,10 +92,9 @@ func normalizeRoster(rows [][]string) ([]rosterEntry, error) {
 		return nil, errors.New("名单为空")
 	}
 	header := trimRow(rows[start])
-	if len(header) < 2 || header[0] != "student_id" || header[1] != "name" {
-		return nil, errors.New("名单表头必须是 student_id,name[,password]")
+	if len(header) != 3 || header[0] != "student_id" || header[1] != "name" || header[2] != "password" {
+		return nil, errors.New("名单表头必须是 student_id,name,password")
 	}
-	hasPassword := len(header) >= 3 && header[2] == "password"
 	entries := make([]rosterEntry, 0, len(rows)-start-1)
 	seen := map[string]bool{}
 	for i := start + 1; i < len(rows); i++ {
@@ -101,17 +102,22 @@ func normalizeRoster(rows [][]string) ([]rosterEntry, error) {
 		if isBlankRow(row) {
 			continue
 		}
-		if len(row) < 2 || row[0] == "" || row[1] == "" {
-			return nil, fmt.Errorf("第 %d 行缺少学号或姓名", i+1)
+		for column, field := range []string{"student_id（学号）", "name（姓名）", "password（密码）"} {
+			if len(row) <= column || row[column] == "" {
+				return nil, fmt.Errorf("第 %d 行 %s 不能为空", i+1, field)
+			}
+		}
+		if len(row) != 3 {
+			return nil, fmt.Errorf("第 %d 行应为 3 列：student_id,name,password", i+1)
+		}
+		if len(row[2]) > 72 {
+			return nil, fmt.Errorf("第 %d 行 password 超过 72 字节", i+1)
 		}
 		if seen[row[0]] {
-			return nil, fmt.Errorf("第 %d 行学号 %s 重复", i+1, row[0])
+			return nil, fmt.Errorf("第 %d 行 student_id（学号）%s 重复", i+1, row[0])
 		}
 		seen[row[0]] = true
-		entry := rosterEntry{StudentID: row[0], Name: row[1]}
-		if hasPassword && len(row) >= 3 {
-			entry.Password = row[2]
-		}
+		entry := rosterEntry{StudentID: row[0], Name: row[1], Password: row[2]}
 		entries = append(entries, entry)
 	}
 	if len(entries) == 0 {
@@ -144,11 +150,7 @@ func RosterCSV(entries []rosterEntry) []byte {
 	writer := csv.NewWriter(&buffer)
 	_ = writer.Write([]string{"student_id", "name", "password"})
 	for _, entry := range entries {
-		password := entry.Password
-		if password == "" {
-			password = entry.StudentID
-		}
-		_ = writer.Write([]string{entry.StudentID, entry.Name, password})
+		_ = writer.Write([]string{entry.StudentID, entry.Name, entry.Password})
 	}
 	writer.Flush()
 	return buffer.Bytes()
@@ -169,6 +171,7 @@ func RosterExampleCSV() []byte {
 // RosterExampleXLSX 返回名单示例（XLSX）。
 func RosterExampleXLSX() ([]byte, error) {
 	file := excelize.NewFile()
+	defer file.Close()
 	sheet := "名单"
 	file.SetSheetName("Sheet1", sheet)
 	for r, row := range rosterExampleRows() {
@@ -181,6 +184,16 @@ func RosterExampleXLSX() ([]byte, error) {
 				return nil, err
 			}
 		}
+	}
+	style, err := file.NewStyle(&excelize.Style{NumFmt: 49})
+	if err != nil {
+		return nil, err
+	}
+	if err := file.SetColStyle(sheet, "A:C", style); err != nil {
+		return nil, err
+	}
+	if err := file.SetColWidth(sheet, "A", "C", 22); err != nil {
+		return nil, err
 	}
 	var buffer bytes.Buffer
 	if err := file.Write(&buffer); err != nil {

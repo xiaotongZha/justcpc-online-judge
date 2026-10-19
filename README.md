@@ -10,6 +10,8 @@
   - **机房考试端（exam-server）** 导出提交包 → 本平台导入评测；
   - 本平台把判题任务发给 **判题引擎（judge-engine）**，由它执行编译/运行/比对。
 
+新建比赛时，题面 PDF 和选手名单分别上传、右侧预览。PDF 请提供考生可阅读及留档的正式版本；名单支持 CSV/XLSX，下载对应“格式模板”填写，名单校验通过后即可创建。
+
 ## 环境要求
 
 - Go 1.26.5+
@@ -55,18 +57,23 @@ go run ./src
 - **管理员（admin）**：账户管理、创建题目、上传测试数据、创建比赛、导入考试数据包、筛选批量评测、导出成绩单/结果包；judge 队列查看与重试。
 - **普通用户（user）**：查看题目并提交自测（提交进入评测队列）。
 
-创建比赛时，选择名单文件后会自动校验并显示选手预览，可按学号或姓名查找、分页核对。名单校验通过后才能创建比赛；预览只显示密码是否已填写，不显示密码内容。
+创建比赛的 CSV/XLSX 名单必须包含 `student_id,name,password`，三列均非空，不再提供默认学生密码。页面提供模板、格式示例及名单预览；密码不在预览中展示，替换名单后重新校验，无需额外勾选确认。学号和密码请按文本填写，保留前导零。
+
+数据交接：**OJ 导出考试包 → 考场 Exam 导入并考试 → 导出提交包 → OJ 对应比赛预览并导入测评**。两种 ZIP 不可混用，文件名包含比赛名称。提交包名单仍为 `student_id,name`，不含密码；缺少平台 ID 的历史包需明确确认目标比赛和全部题号映射。
 
 管理员可在比赛详情页删除比赛，确认后会删除本场考生、提交和评测记录，题库中的原题仍然保留。
 
 ## 主要接口
 
 - 账户：`POST /api/login`、`GET /api/me`、`/api/accounts`（管理员）
+- 详情链接包含记录 ID，可直接访问、刷新及使用浏览器前进后退。
 - 题目：`GET/POST /api/problems`、`GET/PUT/DELETE /api/problems/:id`、`POST /api/problems/:id/testdata`
 - 提交：`GET /api/submissions`（分页筛选）、`GET /api/submissions/:id`
 - 比赛：`GET/POST /api/contests`、`GET/DELETE /api/contests/:id`
+  - `GET /api/problems/:id/testdata`（题目所有者下载已保存的测试数据 ZIP）
   - `POST /api/contest-roster-preview`（管理员上传 `roster` 文件，校验并预览名单，不创建比赛）
-  - `POST /api/contests/:id/import-submissions`（导入考试提交包）
+  - `POST /api/contests/:id/preview-submissions`（上传 `file`，只校验并预览，不写入）
+  - `POST /api/contests/:id/import-submissions`（导入考试提交包；历史包缺 ID 时附 `mapping` JSON，明确 `contest_id` 和 `problems` 题号→OJ 题目 ID）
   - `GET /api/contests/:id/evaluation`（实时评测成绩表）
   - `POST /api/contests/:id/enqueue`（把选中提交加入评测队列）
   - `GET /api/contests/:id/scoreboard.csv`、`GET /api/contests/:id/result-package`

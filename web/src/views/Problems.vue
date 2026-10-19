@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { api } from '../api'
-import { store, navigate, type PublicProblem } from '../store'
+import { computed, toRef, watch } from 'vue'
+import { store, navigate } from '../store'
+import { useListPagination } from '../listPagination'
 
-const keyword = ref('')
+const keyword = toRef(store.problemList, 'keyword')
+watch(keyword, () => {
+  store.problemList.page = 1
+})
 
 const filtered = computed(() => {
   const key = keyword.value.trim().toLowerCase()
@@ -13,17 +15,10 @@ const filtered = computed(() => {
   )
 })
 
-async function openProblem(id: number) {
-  try {
-    store.loading = true
-    store.selectedProblem = await api<PublicProblem>(`/problems/${id}`)
-    store.editTargetID = id
-    navigate('problem-view')
-  } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : String(e))
-  } finally {
-    store.loading = false
-  }
+const pageRows = useListPagination(filtered, store.problemList)
+
+function openProblem(id: number) {
+  navigate('problem-view', id)
 }
 
 function newProblem() {
@@ -64,14 +59,29 @@ function newProblem() {
 
       <div class="oj-table-wrap">
         <el-table
-          :data="filtered"
+          :data="pageRows"
+          class="oj-compact-table"
           v-loading="store.loading"
-          :empty-text="store.problems.length === 0 ? '题目库还没有题目，点击右上角“新建题目”开始创建' : '没有匹配的题目'"
+          :empty-text="
+            store.problems.length === 0
+              ? '题目库还没有题目，点击右上角“新建题目”开始创建'
+              : '没有匹配的题目'
+          "
         >
+          <el-table-column label="编号" width="80">
+            <template #default="{ row }"
+              ><span class="oj-row-id">#{{ row.id }}</span></template
+            >
+          </el-table-column>
           <el-table-column label="题目" min-width="280">
             <template #default="{ row }"
-              ><button class="oj-title-link" @click="openProblem(row.id)">{{ row.title }}</button
-              ><span class="oj-table-id">#{{ row.id }}</span></template
+              ><button
+                class="oj-title-link oj-list-title"
+                :title="row.title"
+                @click="openProblem(row.id)"
+              >
+                {{ row.title }}
+              </button></template
             >
           </el-table-column>
           <el-table-column prop="score" label="分值" width="120" align="right" />
@@ -93,7 +103,18 @@ function newProblem() {
           </el-table-column>
         </el-table>
       </div>
-      <div class="oj-card-footer">共 {{ filtered.length }} 道题目</div>
+      <div class="oj-pagination oj-list-pagination">
+        <el-pagination
+          v-model:current-page="store.problemList.page"
+          v-model:page-size="store.problemList.pageSize"
+          :total="filtered.length"
+          :page-sizes="[10, 20, 50, 100]"
+          :pager-count="5"
+          background
+          layout="total, sizes, prev, pager, next"
+          aria-label="题目库分页"
+        />
+      </div>
     </div>
   </div>
 </template>

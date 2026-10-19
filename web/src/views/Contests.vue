@@ -1,6 +1,13 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { store, navigate } from '../store'
+import { useListPagination } from '../listPagination'
 import type { Contest } from '../store'
+
+const pageRows = useListPagination(
+  computed(() => store.contests),
+  store.contestList,
+)
 
 function openContest(item: Contest) {
   store.selectedContest = item
@@ -24,11 +31,26 @@ function openContest(item: Contest) {
 
     <div class="oj-card">
       <div class="oj-table-wrap">
-        <el-table :data="store.contests" v-loading="store.loading" empty-text="尚未创建比赛">
+        <el-table
+          class="oj-compact-table"
+          :data="pageRows"
+          v-loading="store.loading"
+          empty-text="尚未创建比赛"
+        >
+          <el-table-column label="编号" width="80">
+            <template #default="{ row }"
+              ><span class="oj-row-id">#{{ row.id }}</span></template
+            >
+          </el-table-column>
           <el-table-column label="比赛" min-width="260">
             <template #default="{ row }"
-              ><button class="oj-title-link" @click="openContest(row)">{{ row.name }}</button
-              ><span class="oj-table-id">#{{ row.id }}</span></template
+              ><button
+                class="oj-title-link oj-list-title"
+                :title="row.name"
+                @click="openContest(row)"
+              >
+                {{ row.name }}
+              </button></template
             >
           </el-table-column>
           <el-table-column label="题数" width="80" align="right">
@@ -48,7 +70,18 @@ function openContest(item: Contest) {
           </el-table-column>
         </el-table>
       </div>
-      <div class="oj-card-footer">共 {{ store.contests.length }} 场比赛</div>
+      <div class="oj-pagination oj-list-pagination">
+        <el-pagination
+          v-model:current-page="store.contestList.page"
+          v-model:page-size="store.contestList.pageSize"
+          :total="store.contests.length"
+          :page-sizes="[10, 20, 50, 100]"
+          :pager-count="5"
+          background
+          layout="total, sizes, prev, pager, next"
+          aria-label="比赛管理分页"
+        />
+      </div>
     </div>
   </div>
 </template>

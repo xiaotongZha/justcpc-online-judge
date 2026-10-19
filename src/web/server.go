@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -24,14 +26,15 @@ import (
 )
 
 type Server struct {
-	Accounts    account.Service
-	Sessions    *account.SessionManager
-	Problems    problem.Service
-	Submissions submission.Service
-	Contests    contest.Service
-	Store       *store.Store
-	Dispatcher  *judge.Dispatcher
-	WebDist     string
+	Accounts          account.Service
+	Sessions          *account.SessionManager
+	Problems          problem.Service
+	Submissions       submission.Service
+	Contests          contest.Service
+	Store             *store.Store
+	Dispatcher        *judge.Dispatcher
+	WebDist           string
+	testdataDownloads *testdataDownloadLimiter
 }
 
 type principal struct {
@@ -42,6 +45,7 @@ type principal struct {
 const principalKey = "principal"
 
 func (s Server) Handler() *gin.Engine {
+	s.testdataDownloads = &testdataDownloadLimiter{}
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
 	router.GET("/api/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
@@ -63,6 +67,8 @@ func (s Server) Handler() *gin.Engine {
 	auth.PUT("/problems/:id", s.updateProblem)
 	auth.DELETE("/problems/:id", s.deleteProblem)
 	auth.POST("/problems/:id/testdata", s.uploadTestdata)
+	auth.GET("/problems/:id/testdata", s.downloadTestdata)
+	auth.GET("/problems/:id/testdata/:case/:kind", s.downloadTestdataFile)
 	auth.POST("/problems/:id/submissions", s.createSubmission)
 	auth.GET("/submissions", s.listSubmissions)
 	auth.GET("/submissions/:id", s.getSubmission)
@@ -76,6 +82,7 @@ func (s Server) Handler() *gin.Engine {
 	auth.GET("/contests/:id/statement.pdf", s.contestStatementPDF)
 	auth.POST("/contests/:id/export-exam", s.adminOnly, s.exportExam)
 	auth.POST("/contests/:id/import-submissions", s.adminOnly, s.importSubmissions)
+	auth.POST("/contests/:id/preview-submissions", s.adminOnly, s.importSubmissions)
 	auth.GET("/contests/:id/evaluation", s.contestEvaluation)
 	auth.POST("/contests/:id/enqueue", s.adminOnly, s.enqueueContest)
 	auth.GET("/contests/:id/scoreboard.csv", s.scoreboardCSV)
@@ -296,6 +303,29 @@ func (s Server) uploadTestdata(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
+func (s Server) downloadTestdata(c *gin.Context) {
+	// Build on disk before sending headers, so missing files return a normal
+	// error response and large data sets do not occupy a second copy in RAM.
+	file, err := os.CreateTemp("", "justcpc-testdata-*.zip")
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	defer os.Remove(file.Name())
+	defer file.Close()
+	id := number(c, "id")
+	if err := s.Problems.ExportTestdata(c.Request.Context(), id, s.user(c).ID, file); err != nil {
+		fail(c, err)
+		return
+	}
+	if err := file.Close(); err != nil {
+		fail(c, err)
+		return
+	}
+	c.Header("Content-Type", "application/zip")
+	c.FileAttachment(file.Name(), fmt.Sprintf("problem-%d-testdata.zip", id))
+}
+
 func (s Server) createSubmission(c *gin.Context) {
 	var in submission.CreateInput
 	if !bindJSON(c, &in) {
@@ -378,13 +408,12 @@ func (s Server) previewContestRoster(c *gin.Context) {
 		return
 	}
 	type previewEntry struct {
-		StudentID       string `json:"student_id"`
-		Name            string `json:"name"`
-		DefaultPassword bool   `json:"default_password"`
+		StudentID string `json:"student_id"`
+		Name      string `json:"name"`
 	}
 	preview := make([]previewEntry, 0, len(entries))
 	for _, entry := range entries {
-		preview = append(preview, previewEntry{StudentID: entry.StudentID, Name: entry.Name, DefaultPassword: entry.Password == ""})
+		preview = append(preview, previewEntry{StudentID: entry.StudentID, Name: entry.Name})
 	}
 	c.JSON(http.StatusOK, gin.H{"total": len(preview), "entries": preview})
 }
@@ -445,7 +474,7 @@ func (s Server) exportExam(c *gin.Context) {
 		return
 	}
 	c.Header("Content-Type", "application/zip")
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", name))
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
 	c.Data(http.StatusOK, "application/zip", data)
 }
 func (s Server) importSubmissions(c *gin.Context) {
@@ -458,7 +487,23 @@ func (s Server) importSubmissions(c *gin.Context) {
 		fail(c, errors.New("必须上传考试系统导出的提交包"))
 		return
 	}
-	result, err := s.Contests.ImportSubmissions(c, s.user(c).ID, id, data)
+	if strings.HasSuffix(c.FullPath(), "/preview-submissions") {
+		preview, err := s.Contests.PreviewSubmissions(c, id, data)
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, preview)
+		return
+	}
+	var mapping contest.ImportMapping
+	if raw := c.PostForm("mapping"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &mapping); err != nil {
+			fail(c, errors.New("题目映射格式错误"))
+			return
+		}
+	}
+	result, err := s.Contests.ImportSubmissionsMapped(c, s.user(c).ID, id, data, mapping)
 	if err != nil {
 		fail(c, err)
 		return

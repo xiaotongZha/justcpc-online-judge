@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
@@ -308,6 +309,7 @@ func (s Service) StatementPDF(ctx context.Context, contestID int64) (string, err
 // ---------- 导出考试包 ----------
 
 type examManifest struct {
+	PackageType string        `json:"package_type"`
 	ContestID   int64         `json:"contest_id"`
 	Name        string        `json:"name"`
 	Description string        `json:"description"`
@@ -336,7 +338,7 @@ func (s Service) ExportExamPackage(ctx context.Context, actorID int64, contestID
 		return "", nil, err
 	}
 	manifest := examManifest{
-		ContestID: base.ID, Name: base.Name, Description: base.Description,
+		PackageType: "exam", ContestID: base.ID, Name: base.Name, Description: base.Description,
 	}
 	for _, item := range detail.Problems {
 		limits := item.ResourceLimits
@@ -359,6 +361,9 @@ func (s Service) ExportExamPackage(ctx context.Context, actorID int64, contestID
 	roster, err := os.ReadFile(s.Store.Absolute(rosterPath.String))
 	if err != nil {
 		return "", nil, fmt.Errorf("读取名单失败：%w", err)
+	}
+	if _, err := ParseRoster("roster.csv", roster); err != nil {
+		return "", nil, fmt.Errorf("比赛名单需要补齐密码后才能导出：%w", err)
 	}
 	statement, err := os.ReadFile(s.Store.Absolute(base.StatementPDFPath))
 	if err != nil {
@@ -387,7 +392,7 @@ func (s Service) ExportExamPackage(ctx context.Context, actorID int64, contestID
 	if err := archive.Close(); err != nil {
 		return "", nil, err
 	}
-	fileName := fmt.Sprintf("exam-package-%d.zip", contestID)
+	fileName := PackageFileName("考试包", base.Name, contestID)
 	if err := s.Audit(ctx, actorID, "contest.export_exam", "contest", strconv.FormatInt(contestID, 10), map[string]any{"file": fileName}); err != nil {
 		return fileName, buffer.Bytes(), err
 	}
@@ -397,9 +402,10 @@ func (s Service) ExportExamPackage(ctx context.Context, actorID int64, contestID
 // ---------- 导入提交包 ----------
 
 type submissionManifest struct {
-	ContestID int64  `json:"contest_id"`
-	Name      string `json:"name"`
-	Problems  []struct {
+	PackageType string `json:"package_type"`
+	ContestID   int64  `json:"contest_id"`
+	Name        string `json:"name"`
+	Problems    []struct {
 		ProblemID int64  `json:"problem_id"`
 		Label     string `json:"label"`
 	} `json:"problems"`
@@ -413,77 +419,31 @@ type ImportResult struct {
 // ImportSubmissions 导入考试系统导出的提交包，按题目 ID 关联既有题目。
 // 遇到不属于本比赛的题目 ID 直接拒绝，绝不新建题目。
 func (s Service) ImportSubmissions(ctx context.Context, actorID int64, contestID int64, archive []byte) (ImportResult, error) {
-	labelToProblem, err := s.labelProblemMap(ctx, contestID)
+	return s.ImportSubmissionsMapped(ctx, actorID, contestID, archive, ImportMapping{})
+}
+
+func (s Service) ImportSubmissionsMapped(ctx context.Context, actorID int64, contestID int64, archive []byte, mapping ImportMapping) (ImportResult, error) {
+	data, err := s.readSubmissions(ctx, contestID, archive)
 	if err != nil {
 		return ImportResult{}, err
 	}
-	files, err := readZipFiles(archive)
-	if err != nil {
+	if err := data.preview.validateMapping(mapping); err != nil {
 		return ImportResult{}, err
 	}
-	manifestBytes, ok := files["contest.json"]
-	if !ok {
-		return ImportResult{}, errors.New("提交包缺少 contest.json")
-	}
-	var manifest submissionManifest
-	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
-		return ImportResult{}, fmt.Errorf("contest.json 无法解析：%w", err)
-	}
-	if manifest.ContestID != 0 && manifest.ContestID != contestID {
-		return ImportResult{}, fmt.Errorf("提交包属于比赛 #%d，与当前比赛不一致", manifest.ContestID)
-	}
-	// 校验包内题目映射与本地一致
-	for _, item := range manifest.Problems {
-		local, ok := labelToProblem[item.Label]
-		if !ok || (item.ProblemID != 0 && item.ProblemID != local) {
-			return ImportResult{}, fmt.Errorf("题目 %s 与本地比赛不匹配", item.Label)
-		}
-	}
-
-	csvBytes, ok := files["contestants.csv"]
-	if !ok {
-		return ImportResult{}, errors.New("提交包缺少 contestants.csv")
-	}
-	rows, err := csv.NewReader(strings.NewReader(strings.TrimPrefix(string(csvBytes), "\ufeff"))).ReadAll()
-	if err != nil {
-		return ImportResult{}, fmt.Errorf("contestants.csv：%w", err)
-	}
-	if len(rows) < 1 || len(rows[0]) < 2 || rows[0][0] != "student_id" || rows[0][1] != "name" {
-		return ImportResult{}, errors.New("contestants.csv 表头必须是 student_id,name")
-	}
-
-	type sourceInput struct {
-		StudentID string
-		Label     string
-		Language  string
-		Data      []byte
-	}
-	var sources []sourceInput
-	for path, content := range files {
-		parts := strings.Split(path, "/")
-		if len(parts) != 0 && parts[0] == "submissions" {
-			if len(parts) != 4 || !strings.HasPrefix(parts[3], "source.") {
-				return ImportResult{}, fmt.Errorf("非法提交路径 %s", path)
-			}
-			language := languageForExtension(strings.TrimPrefix(parts[3], "source."))
-			if language == "" {
-				return ImportResult{}, fmt.Errorf("不支持的源码文件 %s", path)
-			}
-			if _, ok := labelToProblem[parts[2]]; !ok {
-				return ImportResult{}, fmt.Errorf("提交引用了不属于本比赛的题目 %s", parts[2])
-			}
-			sources = append(sources, sourceInput{StudentID: parts[1], Label: parts[2], Language: language, Data: content})
-		}
-	}
+	labelToProblem, rows, sources := data.labelToProblem, data.rows, data.sources
 
 	now := store.Now()
 	result := ImportResult{}
-	type stagedSubmission struct {
-		id        int64
-		language  string
-		data      []byte
-	}
-	var staged []stagedSubmission
+	var written []string
+	committed := false
+	defer func() {
+		if !committed {
+			for _, path := range written {
+				_ = os.Remove(s.Store.Absolute(path))
+				_ = os.Remove(filepath.Dir(s.Store.Absolute(path)))
+			}
+		}
+	}()
 	_, err = store.WithTx(ctx, s.Store.DB, func(tx *sql.Tx) (struct{}, error) {
 		contestantIDs := map[string]int64{}
 		for i := 1; i < len(rows); i++ {
@@ -523,25 +483,25 @@ func (s Service) ImportSubmissions(ctx context.Context, actorID int64, contestID
 				return struct{}{}, err
 			}
 			id, _ := res.LastInsertId()
-			relative := filepath.Join("submissions", strconv.FormatInt(id, 10), "main."+extension(source.Language))
+			relative := filepath.Join("submissions", strconv.FormatInt(id, 10), "main-"+rand.Text()+"."+extension(source.Language))
 			if _, err := tx.ExecContext(ctx, `UPDATE submissions SET source_path=? WHERE id=?`, relative, id); err != nil {
 				return struct{}{}, err
 			}
-			staged = append(staged, stagedSubmission{id: id, language: source.Language, data: source.Data})
+			written = append(written, relative)
+			if err := s.Store.WriteFile(relative, source.Data); err != nil {
+				return struct{}{}, err
+			}
 			result.Submissions++
 		}
 		return struct{}{}, auditTx(ctx, tx, actorID, "contest.import_submissions", "contest", strconv.FormatInt(contestID, 10), map[string]any{
 			"contestants": result.Contestants, "submissions": result.Submissions,
+			"legacy_mapping": data.preview.RequiresMapping, "problem_mapping": mapping.Problems,
 		})
 	})
 	if err != nil {
 		return ImportResult{}, err
 	}
-	for _, item := range staged {
-		if err := s.Store.WriteFile(filepath.Join("submissions", strconv.FormatInt(item.id, 10), "main."+extension(item.language)), item.data); err != nil {
-			return ImportResult{}, err
-		}
-	}
+	committed = true
 	return result, nil
 }
 
@@ -644,6 +604,7 @@ type Scoreboard struct {
 }
 
 type ScoreboardRow struct {
+	HasSubmission bool     `json:"has_submission"`
 	Rank          int      `json:"rank"`
 	HasScore      bool     `json:"has_score"`
 	StudentID     string   `json:"student_id"`
@@ -711,6 +672,7 @@ func (s Service) buildScoreboard(ctx context.Context, contestID int64) (Scoreboa
 			if err != nil {
 				return board, err
 			}
+			row.HasSubmission = true
 			row.SubmissionIDs = append(row.SubmissionIDs, submissionID.Int64)
 			if score.Valid {
 				row.Scores = append(row.Scores, store.FormatScore(score.Int64))
@@ -729,6 +691,9 @@ func (s Service) buildScoreboard(ctx context.Context, contestID int64) (Scoreboa
 		board.Rows = append(board.Rows, row)
 	}
 	sort.SliceStable(board.Rows, func(i, j int) bool {
+		if board.Rows[i].HasSubmission != board.Rows[j].HasSubmission {
+			return board.Rows[i].HasSubmission
+		}
 		if board.Rows[i].HasScore != board.Rows[j].HasScore {
 			return board.Rows[i].HasScore
 		}
@@ -883,12 +848,13 @@ type EvalCell struct {
 }
 
 type EvalRow struct {
-	Rank      int        `json:"rank"`
-	HasScore  bool       `json:"has_score"`
-	StudentID string     `json:"student_id"`
-	Name      string     `json:"name"`
-	Cells     []EvalCell `json:"cells"`
-	Total     string     `json:"total"`
+	HasSubmission bool       `json:"has_submission"`
+	Rank          int        `json:"rank"`
+	HasScore      bool       `json:"has_score"`
+	StudentID     string     `json:"student_id"`
+	Name          string     `json:"name"`
+	Cells         []EvalCell `json:"cells"`
+	Total         string     `json:"total"`
 }
 
 // Evaluation 是比赛评测页所需的实时二维成绩表（考生 × 题目）。
@@ -961,6 +927,7 @@ func (s Service) Evaluation(ctx context.Context, contestID int64) (Evaluation, e
 			if err != nil {
 				return result, err
 			}
+			row.HasSubmission = true
 			cell.HasSubmission = true
 			cell.SubmissionID = submissionID.Int64
 			cell.Status = status
@@ -983,7 +950,7 @@ func (s Service) Evaluation(ctx context.Context, contestID int64) (Evaluation, e
 		return result, err
 	}
 
-	// 有分数者按总分降序、并列同名次；没有分数者排在最后、按学号升序，名次显示为“-”。
+	// 有成绩者按总分排名；未出成绩时，有提交者优先，无提交者置后，各组内按学号排序。
 	scored := make([]EvalRow, 0, len(result.Rows))
 	unscored := make([]EvalRow, 0, len(result.Rows))
 	for _, row := range result.Rows {
@@ -1001,7 +968,12 @@ func (s Service) Evaluation(ctx context.Context, contestID int64) (Evaluation, e
 		}
 		return scored[i].StudentID < scored[j].StudentID
 	})
-	sort.SliceStable(unscored, func(i, j int) bool { return unscored[i].StudentID < unscored[j].StudentID })
+	sort.SliceStable(unscored, func(i, j int) bool {
+		if unscored[i].HasSubmission != unscored[j].HasSubmission {
+			return unscored[i].HasSubmission
+		}
+		return unscored[i].StudentID < unscored[j].StudentID
+	})
 	last := ""
 	rank := 0
 	for i := range scored {
@@ -1053,4 +1025,19 @@ func languageForExtension(ext string) string {
 		return "python3"
 	}
 	return ""
+}
+
+// PackageFileName 生成便于识别、可在 Windows 保存的文件名。
+func PackageFileName(kind, name string, id int64) string {
+	name = strings.Map(func(r rune) rune {
+		if r < 32 || strings.ContainsRune(`<>:"/\|?*`, r) {
+			return '-'
+		}
+		return r
+	}, name)
+	runes := []rune(strings.Trim(name, " ."))
+	if len(runes) > 64 {
+		runes = runes[:64]
+	}
+	return fmt.Sprintf("%s-%s-%d.zip", kind, string(runes), id)
 }

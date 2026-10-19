@@ -397,6 +397,29 @@ a {
 .oj-title-link:hover {
   color: var(--oj-primary);
 }
+.oj-compact-table td.el-table__cell {
+  padding: 8px 0;
+}
+.oj-list-title {
+  display: block;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.oj-row-id {
+  color: var(--oj-text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.oj-list-pagination .el-pagination {
+  flex-wrap: wrap;
+  gap: 8px 0;
+}
+.oj-list-pagination {
+  overflow: visible;
+}
 .oj-table-id {
   display: block;
   margin-top: 4px;
@@ -677,25 +700,6 @@ a {
   font-weight: 400;
   margin: 0 0 10px;
 }
-.oj-resource-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-}
-.oj-resource-item {
-  padding: 18px;
-  border: 1px solid var(--oj-border);
-  border-radius: 8px;
-  background: #fafbfe;
-}
-.oj-resource-item > strong {
-  display: block;
-  font-size: 13px;
-  margin-bottom: 15px;
-}
-.oj-resource-item .el-form-item:last-child {
-  margin-bottom: 0;
-}
 .oj-sticky-actions {
   position: sticky;
   bottom: 16px;
@@ -870,32 +874,11 @@ a {
   .oj-header {
     padding-inline: 24px;
   }
-  .oj-resource-grid {
-    gap: 12px;
-  }
-  .oj-resource-item {
-    padding: 14px;
-  }
 }
 @media (max-width: 1000px) {
   .oj-editor-split,
   .oj-form-grid {
     grid-template-columns: 1fr;
-  }
-  .oj-resource-grid {
-    grid-template-columns: 1fr;
-  }
-  .oj-resource-item {
-    display: grid;
-    grid-template-columns: 90px 1fr 1fr;
-    align-items: start;
-    gap: 16px;
-  }
-  .oj-resource-item .el-form-item {
-    margin-bottom: 0;
-  }
-  .oj-resource-item > strong {
-    padding-top: 26px;
   }
   .oj-details-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -973,15 +956,6 @@ a {
   }
   .oj-limits {
     justify-content: flex-start;
-  }
-  .oj-resource-item {
-    display: block;
-  }
-  .oj-resource-item > strong {
-    padding-top: 0;
-  }
-  .oj-resource-item .el-form-item {
-    margin-bottom: 14px;
   }
   .oj-sticky-actions {
     bottom: 8px;

@@ -305,6 +305,50 @@ func (s Service) UploadTestdata(ctx context.Context, id, actorID int64, archive 
 	return err
 }
 
+// ExportTestdata writes the saved input/output pairs as a ZIP. Access follows
+// the same ownership rule as editing and uploading test data.
+func (s Service) ExportTestdata(ctx context.Context, id, actorID int64, output io.Writer) error {
+	if err := s.canManage(ctx, id, actorID); err != nil {
+		return err
+	}
+	p, err := s.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	cases, err := s.Cases(p)
+	if err != nil {
+		return err
+	}
+	if len(cases) == 0 {
+		return errors.New("problem has no test data")
+	}
+	archive := zip.NewWriter(output)
+	defer archive.Close()
+	for _, test := range cases {
+		for _, kind := range []struct{ suffix, pathKey string }{{"in", "input_path"}, {"out", "expected_path"}} {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			file, err := os.Open(test[kind.pathKey])
+			if err != nil {
+				return err
+			}
+			entry, err := archive.Create(test["id"] + "." + kind.suffix)
+			if err == nil {
+				_, err = io.Copy(entry, file)
+			}
+			closeErr := file.Close()
+			if err != nil {
+				return err
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+		}
+	}
+	return archive.Close()
+}
+
 func (s Service) canManage(ctx context.Context, id, actorID int64) error {
 	var owner sql.NullInt64
 	err := s.Store.DB.QueryRowContext(ctx, `SELECT owner_account_id FROM problems WHERE id=?`, id).Scan(&owner)

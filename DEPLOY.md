@@ -2,6 +2,8 @@
 
 ## 下载安装
 
+[GitHub 下载](https://github.com/xiaotongZha/justcpc-online-judge/releases/tag/v1.0.0) · [Gitee 下载](https://gitee.com/zhaxt/justcpc-online-judge/releases/tag/v1.0.0)
+
 Ubuntu 24.04、amd64、systemd。先[安装测评引擎](https://github.com/xiaotongZha/justcpc-judge-engine/blob/master/DEPLOY.md)，两者使用同一服务器、同一普通账号；无需 Go、Node.js。
 
 ```bash
@@ -10,8 +12,8 @@ sudo apt-get install -y curl ca-certificates
 mkdir -p ~/justcpc/online-judge
 cd ~/justcpc/online-judge
 
-release_url=https://github.com/xiaotongZha/justcpc-online-judge/releases/download/v0.2.1
-archive=JustCPC-OJ-0.2.1-linux-amd64.tar.gz
+release_url=https://github.com/xiaotongZha/justcpc-online-judge/releases/download/v1.0.0
+archive=JustCPC-OJ-1.0.0-linux-amd64.tar.gz
 curl -fLO "$release_url/$archive"
 curl -fLO "$release_url/$archive.sha256"
 sha256sum -c "$archive.sha256" && tar -xzf "$archive" --strip-components=1
@@ -40,4 +42,4 @@ sudo systemctl start justcpc-online-judge
 
 ## 从源码构建
 
-构建机安装 Go 1.26.5+、Node.js 22.12+、npm，在仓库根目录执行 `./script/build-release.sh`。产物在 `release/`；指定版本用 `VERSION=0.2.2 ./script/build-release.sh`。
+构建机安装 Go 1.26.5+、Node.js 22.13+、npm，在仓库根目录执行 `./script/build-release.sh`。产物在 `release/`；指定版本用 `VERSION=1.0.0 ./script/build-release.sh`。

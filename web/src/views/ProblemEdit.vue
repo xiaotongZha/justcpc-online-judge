@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import {
@@ -9,7 +9,7 @@ import {
   refresh,
   languageLabel,
   type EditorProblem,
-  type PublicProblem,
+  routeHash,
 } from '../store'
 import Markdown from '../components/Markdown.vue'
 
@@ -41,7 +41,10 @@ async function load() {
   }
   loading.value = true
   try {
-    const item = await api<EditorProblem>(`/problems/${store.editTargetID}/editor`)
+    const item =
+      store.selectedEditor?.id === store.editTargetID
+        ? store.selectedEditor
+        : await api<EditorProblem>(`/problems/${store.editTargetID}/editor`)
     store.selectedEditor = item
     Object.assign(form, {
       title: item.title,
@@ -58,9 +61,10 @@ async function load() {
   }
 }
 
-watch(() => store.editTargetID, load, { immediate: true })
+void load()
 
 async function save() {
+  if (saving.value) return
   if (!form.title.trim()) {
     ElMessage.warning('标题不能为空')
     return
@@ -74,6 +78,12 @@ async function save() {
     )
     store.selectedEditor = item
     store.editTargetID = item.id
+    store.routeID = item.id
+    history.replaceState(
+      { ...history.state, justcpc: true },
+      '',
+      routeHash('problem-edit', item.id),
+    )
     if (testFile.value) {
       const formData = new FormData()
       formData.append('file', testFile.value)
@@ -81,10 +91,8 @@ async function save() {
       testFile.value = null
     }
     ElMessage.success('题目已保存')
-    await refresh()
-    // 保存完成后跳转到该题目的详情页。
-    store.selectedProblem = await api<PublicProblem>(`/problems/${item.id}`)
-    navigate('problem-view')
+    navigate('problem-view', item.id)
+    await refresh().catch(() => ElMessage.warning('题目已保存，列表更新失败，请稍后刷新'))
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : String(e))
   } finally {
@@ -94,15 +102,7 @@ async function save() {
 
 async function viewPage() {
   if (!isEdit.value) return
-  try {
-    store.loading = true
-    store.selectedProblem = await api<PublicProblem>(`/problems/${store.editTargetID}`)
-    navigate('problem-view')
-  } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : String(e))
-  } finally {
-    store.loading = false
-  }
+  navigate('problem-view', store.editTargetID)
 }
 </script>
 
@@ -131,46 +131,37 @@ async function viewPage() {
                 ><el-input v-model="form.score" placeholder="如 100 / 12.5"
               /></el-form-item>
             </div>
-            <div class="row">
-              <el-form-item label="浮点误差比较" style="margin-right: 28px"
-                ><el-switch v-model="form.compare.floating_point"
-              /></el-form-item>
-              <el-form-item v-if="form.compare.floating_point" label="允许误差 Epsilon"
-                ><el-input-number
-                  v-model="form.compare.epsilon"
-                  :min="0"
-                  :step="0.0001"
-                  :precision="6"
-              /></el-form-item>
-            </div>
-          </section>
-
-          <section class="oj-form-section">
-            <div class="oj-section-title">
-              <h3>资源限制</h3>
-              <span>按语言分别设置</span>
-            </div>
-            <div class="oj-resource-grid">
+            <div class="language-limits" role="group" aria-label="各语言资源限制">
               <div
                 v-for="(limit, language) in form.resource_limits"
                 :key="language"
-                class="oj-resource-item"
+                class="limit-row"
               >
-                <strong>{{ languageLabel[language] ?? language }}</strong>
-                <el-form-item label="时间限制（ms）"
-                  ><el-input-number
+                <span class="language-name">{{ languageLabel[language] ?? language }}</span>
+                <div class="limit-field">
+                  <label :for="`limit-${language}-time`">时间</label>
+                  <el-input-number
                     v-model="limit.time_limit_ms"
                     :min="1"
                     :step="100"
-                    style="width: 100%"
-                /></el-form-item>
-                <el-form-item label="内存限制（MB）"
-                  ><el-input-number
+                    :controls="false"
+                    :id="`limit-${language}-time`"
+                    :aria-label="`${languageLabel[language] ?? language} 时间限制（ms）`"
+                  />
+                  <span class="limit-unit">ms</span>
+                </div>
+                <div class="limit-field">
+                  <label :for="`limit-${language}-memory`">内存</label>
+                  <el-input-number
                     v-model="limit.memory_limit_mb"
                     :min="1"
                     :step="32"
-                    style="width: 100%"
-                /></el-form-item>
+                    :controls="false"
+                    :id="`limit-${language}-memory`"
+                    :aria-label="`${languageLabel[language] ?? language} 内存限制（MB）`"
+                  />
+                  <span class="limit-unit">MB</span>
+                </div>
               </div>
             </div>
           </section>
@@ -198,9 +189,34 @@ async function viewPage() {
           </section>
 
           <section class="oj-form-section">
-            <div class="oj-section-title">
-              <h3>测试数据</h3>
-              <span>可选，可在保存后补充</span>
+            <div class="testdata-heading">
+              <div class="oj-section-title">
+                <h3>测试数据</h3>
+                <span>可选，可在保存后补充</span>
+              </div>
+              <div class="comparison-settings">
+                <div class="comparison-controls">
+                  <label for="floating-point-switch">浮点误差比较</label>
+                  <el-switch
+                    v-model="form.compare.floating_point"
+                    id="floating-point-switch"
+                    aria-label="浮点误差比较"
+                  />
+                  <label v-if="form.compare.floating_point" class="epsilon-field">
+                    允许误差
+                    <el-input-number
+                      v-model="form.compare.epsilon"
+                      :min="0"
+                      :step="0.0001"
+                      :precision="6"
+                      size="small"
+                      controls-position="right"
+                      aria-label="允许误差 Epsilon"
+                    />
+                  </label>
+                </div>
+                <p>仅当输出含浮点数且需要允许误差时开启。</p>
+              </div>
             </div>
             <el-alert
               type="info"
@@ -223,11 +239,21 @@ async function viewPage() {
                   ><el-icon><Upload /></el-icon>选择 ZIP</el-button
                 ></el-upload
               >
+              <el-button
+                v-if="isEdit && store.selectedEditor?.testdata_ready"
+                tag="a"
+                class="testdata-download"
+                :href="`/api/problems/${store.editTargetID}/testdata`"
+                download
+              >
+                <el-icon><Download /></el-icon>下载已有测试数据
+              </el-button>
               <span class="small muted">{{ testFile ? testFile.name : '未选择新文件' }}</span>
             </div>
             <p class="oj-help">
               ZIP 需包含从 1 开始连续配对的 <span class="mono">N.in</span> /
-              <span class="mono">N.out</span>；保存时上传，替换原有测试数据。
+              <span class="mono">N.out</span
+              >；保存时上传，替换原有测试数据。下载仅包含当前已保存的数据。
             </p>
           </section>
         </el-form>
@@ -242,3 +268,99 @@ async function viewPage() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.language-limits {
+  max-width: 760px;
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.limit-row {
+  display: grid;
+  grid-template-columns: 72px repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: 24px;
+}
+.language-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.limit-field {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 26px;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+.limit-field label,
+.limit-unit {
+  color: var(--oj-text-secondary);
+}
+.limit-field .el-input-number {
+  width: 100%;
+}
+.limit-unit {
+  font-size: 12px;
+}
+.testdata-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin-bottom: 16px;
+}
+.testdata-heading .oj-section-title {
+  margin-bottom: 0;
+}
+.testdata-download {
+  text-decoration: none;
+}
+.comparison-settings {
+  margin-left: auto;
+}
+.comparison-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 13px;
+}
+.comparison-settings p {
+  font-size: 12px;
+  color: var(--oj-text-secondary);
+  margin: 4px 0 0;
+  text-align: right;
+}
+.epsilon-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.epsilon-field .el-input-number {
+  width: 136px;
+}
+@media (max-width: 600px) {
+  .limit-row {
+    grid-template-columns: 62px minmax(0, 1fr);
+    gap: 8px 12px;
+  }
+  .language-name {
+    grid-row: span 2;
+    align-self: start;
+    padding-top: 8px;
+  }
+  .comparison-settings {
+    margin-left: 0;
+  }
+  .comparison-controls {
+    justify-content: flex-start;
+  }
+  .comparison-settings p {
+    text-align: left;
+  }
+}
+</style>

@@ -84,16 +84,8 @@ onBeforeUnmount(() => {
   if (debounce) clearTimeout(debounce)
 })
 
-async function openDetail(id: number) {
-  loading.value = true
-  try {
-    store.selectedSubmission = await api<Submission>(`/submissions/${id}`)
-    navigate('submission-detail')
-  } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : String(e))
-  } finally {
-    loading.value = false
-  }
+function openDetail(id: number) {
+  navigate('submission-detail', id)
 }
 </script>
 

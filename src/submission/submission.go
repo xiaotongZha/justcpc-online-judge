@@ -17,19 +17,20 @@ import (
 var ErrForbidden = errors.New("permission denied")
 
 type Submission struct {
-	ID           int64           `json:"id"`
-	ProblemID    int64           `json:"problem_id"`
-	ProblemTitle string          `json:"problem_title"`
-	IsContestant bool            `json:"is_contestant"`
-	Submitter    string          `json:"submitter"`
-	Language     string          `json:"language"`
-	Status       string          `json:"status"`
-	Score        int64           `json:"-"`
-	ScoreText    string          `json:"score"`
-	SubmittedAt  string          `json:"submitted_at"`
-	JudgedAt     *string         `json:"judged_at,omitempty"`
-	Source       string          `json:"source,omitempty"`
-	JudgeResult  json.RawMessage `json:"judge_result_json,omitempty"`
+	ID                  int64           `json:"id"`
+	ProblemID           int64           `json:"problem_id"`
+	ProblemTitle        string          `json:"problem_title"`
+	IsContestant        bool            `json:"is_contestant"`
+	Submitter           string          `json:"submitter"`
+	Language            string          `json:"language"`
+	Status              string          `json:"status"`
+	Score               int64           `json:"-"`
+	ScoreText           string          `json:"score"`
+	SubmittedAt         string          `json:"submitted_at"`
+	JudgedAt            *string         `json:"judged_at,omitempty"`
+	Source              string          `json:"source,omitempty"`
+	JudgeResult         json.RawMessage `json:"judge_result_json,omitempty"`
+	CanDownloadTestdata bool            `json:"can_download_testdata"`
 }
 
 type CreateInput struct {
@@ -196,6 +197,7 @@ func (s Service) Detail(ctx context.Context, id, accountID int64, isAdmin bool) 
 		return Submission{}, err
 	}
 	item.Source = string(data)
+	item.CanDownloadTestdata = isAdmin || (owner.Valid && owner.Int64 == accountID)
 	item.ScoreText = store.FormatScore(item.Score)
 	if judged.Valid {
 		item.JudgedAt = &judged.String
