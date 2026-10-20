@@ -8,4 +8,6 @@ fi
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$script_dir/.."
 export GIN_MODE="${GIN_MODE:-release}"
-exec ./bin/justcpc-online-judge
+binary=./bin/justcpc-online-judge
+if [[ -f go.mod ]]; then binary=./build/bin/justcpc-online-judge; fi
+exec "$binary"

@@ -7,3 +7,7 @@ web/*.tsbuildinfo
 test/
 release/
 /bin/
+
+__pycache__/
+
+/build/

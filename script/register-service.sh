@@ -26,6 +26,7 @@ if [[ "$release_dir" =~ [[:space:]%] ]]; then
     printf 'The deployment path must not contain whitespace or %% characters.\n' >&2; exit 1
 fi
 binary="$release_dir/bin/justcpc-online-judge"
+if [[ -f "$release_dir/go.mod" ]]; then binary="$release_dir/build/bin/justcpc-online-judge"; fi
 if [[ ! -x "$binary" || ! -f "$release_dir/web/dist/index.html" ]]; then
     printf 'Release is incomplete: binary or web/dist/index.html is missing.\n' >&2; exit 1
 fi
